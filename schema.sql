@@ -244,8 +244,11 @@ $$ language plpgsql;
 create or replace function trg_fn_pesagem_alterada()
 returns trigger as $$
 begin
+  if pg_trigger_depth() > 1 then
+    return coalesce(new, old);
+  end if;
   perform recalcular_pesagens_animal(coalesce(new.animal_id, old.animal_id));
-  return new;
+  return coalesce(new, old);
 end;
 $$ language plpgsql;
 
