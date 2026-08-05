@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agropecuária Pontual — Painel</title>
+<link rel="icon" href="logo-pontual.png" type="image/png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<script src="supabase-config.js"></script>
+<script src="layout.js"></script>
+<script>
+renderTopbarSidebar('painel');
+
+document.getElementById('mainContent').innerHTML = `
+  <div class="pagehead">
+    <div>
+      <div class="pagetitle">Painel</div>
+      <div class="pagesub" id="dataAtual"></div>
+    </div>
+    <div style="position:relative">
+      <button class="btn btn-secondary" id="btnFiltroFazendas" onclick="alternarPainelFiltro()">
+        <i class="ti ti-filter"></i> <span id="labelFiltroFazendas">Todas as fazendas</span> <i class="ti ti-chevron-down"></i>
+      </button>
+      <div id="painelFiltroFazendas" class="card" style="display:none;position:absolute;right:0;top:42px;z-index:30;min-width:220px;max-height:320px;overflow-y:auto">
+        <div class="cardb" id="listaFiltroFazendas"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="metrics" id="metricas">
+    <div class="metric"><span class="spinner"></span></div>
+  </div>
+  <div class="metrics" id="metricas2" style="margin-top:-4px"></div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px" id="graficosTopo"></div>
+
+  <div class="card" id="cardEvolucao">
+    <div class="cardh"><i class="ti ti-trending-up"></i> Histórico de evolução do rebanho</div>
+    <div class="cardb"><canvas id="chartEvolucao" height="90"></canvas></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px" id="graficosBaixo"></div>
+`;
+
+document.getElementById('dataAtual').textContent = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+
+const PALETA_CATEGORIAS = {
+  'Bezerro': '#4a9eff', 'Bezerra': '#ff8fb3', 'Garrote': '#f0b840', 'Novilho': '#4dd4a0',
+  'Novilha': '#a87fe0', 'Boi': '#1a4a8a', 'Vaca': '#d63b6e', 'Touro': '#2d6e4e',
+  'Matrona': '#8a5a2b', 'Vaca seca': '#7a7a7a', 'Sem categoria': '#5a7fa0',
+};
+
+let todosFazendaOptions = [];
+let fazendasSelecionadas = new Set();
+let animaisGlobalCache = [];
+let chartEvolucaoInstance = null;
+let chartComposicaoInstance = null;
+
+function carregarSelecaoFazendasSalva() {
+  try {
+    const salvas = JSON.parse(localStorage.getItem('pontual-painel-fazendas'));
+    if (Array.isArray(salvas)) return new Set(salvas);
+  } catch (e) { /* ignora */ }
+  return new Set();
+}
+
+function salvarSelecaoFazendas() {
+  localStorage.setItem('pontual-painel-fazendas', JSON.stringify([...fazendasSelecionadas]));
+}
+
+function alternarPainelFiltro() {
+  const painel = document.getElementById('painelFiltroFazendas');
+  painel.style.display = painel.style.display === 'none' ? 'block' : 'none';
+}
+
+document.addEventListener('click', (e) => {
+  const painel = document.getElementById('painelFiltroFazendas');
+  const btn = document.getElementById('btnFiltroFazendas');
+  if (painel && !painel.contains(e.target) && !btn.contains(e.target)) {
+    painel.style.display = 'none';
+  }
+});
+
+function renderFiltroFazendas() {
+  const todasMarcadas = fazendasSelecionadas.size === 0;
+  document.getElementById('listaFiltroFazendas').innerHTML = `
+    <label class="fcheck" style="padding-top:0;border-bottom:0.5px solid var(--divider);padding-bottom:8px;margin-bottom:6px">
+      <input type="checkbox" ${todasMarcadas ? 'checked' : ''} onchange="marcarTodasFazendasPainel(this.checked)"> <b>Todas as fazendas</b>
+    </label>
+    ${todosFazendaOptions.map(f => `
+      <label class="fcheck" style="padding-top:0">
+        <input type="checkbox" value="${f.id}" ${fazendasSelecionadas.has(f.id) ? 'checked' : ''} onchange="alternarFazendaPainel('${f.id}', this.checked)">
+        ${f.nome}
+      </label>
+    `).join('')}
+  `;
+
+  const label = todasMarcadas
+    ? 'Todas as fazendas'
+    : (fazendasSelecionadas.size === 1
+        ? todosFazendaOptions.find(f => fazendasSelecionadas.has(f.id))?.nome || '1 fazenda'
+        : `${fazendasSelecionadas.size} fazendas selecionadas`);
+  document.getElementById('labelFiltroFazendas').textContent = label;
+}
+
+function marcarTodasFazendasPainel(marcarTodas) {
+  fazendasSelecionadas = new Set();
+  salvarSelecaoFazendas();
+  renderFiltroFazendas();
+  renderPainelCompleto();
+}
+
+function alternarFazendaPainel(id, marcado) {
+  if (marcado) fazendasSelecionadas.add(id); else fazendasSelecionadas.delete(id);
+  salvarSelecaoFazendas();
+  renderFiltroFazendas();
+  renderPainelCompleto();
+}
+
+function categoriaLabel(c) { return c || 'Sem categoria'; }
+
+function corCategoria(c) {
+  return PALETA_CATEGORIAS[categoriaLabel(c)] || '#5a7fa0';
+}
+
+async function carregarPainel() {
+  await checkAuth();
+  showUserEmail();
+
+  const [animais, { data: fazendas }, pesagensTodas] = await Promise.all([
+    buscarPaginado(() => supabaseClient.from('vw_animais_resumo').select('*')),
+    supabaseClient.from('fazendas').select('id, nome').order('nome'),
+    buscarPaginado(() => supabaseClient.from('pesagens').select('animal_id, data_pesagem, gmd_periodo').order('data_pesagem', { ascending: false })),
+  ]);
+
+  todosFazendaOptions = fazendas || [];
+  fazendasSelecionadas = carregarSelecaoFazendasSalva();
+  // remove da seleção salva qualquer fazenda que não exista mais
+  fazendasSelecionadas = new Set([...fazendasSelecionadas].filter(id => todosFazendaOptions.some(f => f.id === id)));
+  renderFiltroFazendas();
+
+  // gmd_atual da view é o GMD acumulado desde a entrada (= GMDT). O "Último GMD" (gmd_periodo
+  // da pesagem mais recente) vem separado da tabela pesagens.
+  const gmdPeriodoPorAnimal = new Map();
+  const dataUltimoPesoPorAnimal = new Map();
+  (pesagensTodas || []).forEach(p => {
+    if (!gmdPeriodoPorAnimal.has(p.animal_id)) {
+      gmdPeriodoPorAnimal.set(p.animal_id, p.gmd_periodo);
+      dataUltimoPesoPorAnimal.set(p.animal_id, p.data_pesagem);
+    }
+  });
+
+  animaisGlobalCache = (animais || []).map(a => ({
+    ...a,
+    gmdt: a.gmd_atual,
+    gmd_ultimo: gmdPeriodoPorAnimal.has(a.id) ? gmdPeriodoPorAnimal.get(a.id) : null,
+    data_ultimo_peso: dataUltimoPesoPorAnimal.has(a.id) ? dataUltimoPesoPorAnimal.get(a.id) : a.data_entrada,
+  }));
+
+  renderPainelCompleto();
+}
+
+function listaFiltradaPainel() {
+  if (fazendasSelecionadas.size === 0) return animaisGlobalCache;
+  return animaisGlobalCache.filter(a => fazendasSelecionadas.has(a.fazenda_id));
+}
+
+function renderPainelCompleto() {
+  const todos = listaFiltradaPainel();
+  const ativos = todos.filter(a => a.status === 'ativo');
+
+  renderMetricas(todos, ativos);
+  renderComposicaoRankingTopo(ativos);
+  renderEvolucaoRebanho(todos);
+  renderSemPesagemEMangas(ativos);
+}
+
+function renderMetricas(todos, ativos) {
+  const pesoTotal = ativos.reduce((s, a) => s + (Number(a.peso_atual) || 0), 0);
+  const pesoMedio = ativos.length ? pesoTotal / ativos.length : 0;
+
+  const gmdValidos = ativos.filter(a => a.gmd_ultimo !== null).map(a => Number(a.gmd_ultimo));
+  const gmdMedio = gmdValidos.length ? gmdValidos.reduce((s, v) => s + v, 0) / gmdValidos.length : 0;
+
+  const gmdtValidos = ativos.filter(a => a.gmdt !== null).map(a => Number(a.gmdt));
+  const gmdtMedio = gmdtValidos.length ? gmdtValidos.reduce((s, v) => s + v, 0) / gmdtValidos.length : 0;
+
+  const hoje = new Date();
+  const semPesagem30 = ativos.filter(a => {
+    if (!a.data_ultimo_peso) return false;
+    const dias = Math.round((hoje - new Date(a.data_ultimo_peso + 'T00:00:00')) / 86400000);
+    return dias > 30;
+  }).length;
+
+  const fazendasNoFiltro = fazendasSelecionadas.size === 0 ? todosFazendaOptions.length : fazendasSelecionadas.size;
+
+  document.getElementById('metricas').innerHTML = `
+    <div class="metric">
+      <div class="micon bg-info"><i class="ti ti-tag"></i></div>
+      <div><div class="mlabel">Animais ativos</div><div class="mval">${ativos.length}</div></div>
+    </div>
+    <div class="metric">
+      <div class="micon bg-success"><i class="ti ti-weight"></i></div>
+      <div><div class="mlabel">Peso total</div><div class="mval">${pesoTotal.toLocaleString('pt-BR')} kg</div></div>
+    </div>
+    <div class="metric">
+      <div class="micon bg-info"><i class="ti ti-scale"></i></div>
+      <div><div class="mlabel">Peso médio do rebanho</div><div class="mval">${pesoMedio.toFixed(0)} kg</div></div>
+    </div>
+    <div class="metric">
+      <div class="micon bg-info"><i class="ti ti-building-warehouse"></i></div>
+      <div><div class="mlabel">Fazendas</div><div class="mval">${fazendasNoFiltro}</div></div>
+    </div>
+  `;
+
+  document.getElementById('metricas2').innerHTML = `
+    <div class="metric">
+      <div class="micon bg-warning"><i class="ti ti-chart-line"></i></div>
+      <div><div class="mlabel">GMD médio (último período)</div><div class="mval">${gmdMedio.toFixed(2)} kg/dia</div></div>
+    </div>
+    <div class="metric">
+      <div class="micon bg-warning"><i class="ti ti-trending-up"></i></div>
+      <div><div class="mlabel">GMDT médio (desde a entrada)</div><div class="mval">${gmdtMedio.toFixed(2)} kg/dia</div></div>
+    </div>
+    <div class="metric">
+      <div class="micon bg-danger"><i class="ti ti-calendar-off"></i></div>
+      <div><div class="mlabel">Sem pesagem há +30 dias</div><div class="mval">${semPesagem30}</div></div>
+    </div>
+  `;
+}
+
+function renderComposicaoRankingTopo(ativos) {
+  // ---- Composição do rebanho (donut por categoria) ----
+  const porCategoria = {};
+  ativos.forEach(a => {
+    const c = categoriaLabel(a.categoria);
+    porCategoria[c] = (porCategoria[c] || 0) + 1;
+  });
+  const categorias = Object.keys(porCategoria);
+
+  // ---- Ranking de lotes por maior ganho de peso ----
+  const porLote = {};
+  ativos.forEach(a => {
+    const chave = a.lote_id || 'sem-lote';
+    if (!porLote[chave]) {
+      porLote[chave] = { lote_nome: a.lote_nome || 'Sem lote', fazenda_nome: a.fazenda_nome || '—', qtd: 0, somaGmd: 0, qtdGmd: 0, ganhoTotal: 0 };
+    }
+    const grupo = porLote[chave];
+    grupo.qtd++;
+    if (a.gmd_ultimo !== null) { grupo.somaGmd += Number(a.gmd_ultimo); grupo.qtdGmd++; }
+    grupo.ganhoTotal += Number(a.ganho_total) || 0;
+  });
+
+  const ranking = Object.values(porLote)
+    .filter(l => l.qtdGmd > 0)
+    .map(l => ({ ...l, gmdMedio: l.somaGmd / l.qtdGmd }))
+    .sort((a, b) => b.gmdMedio - a.gmdMedio)
+    .slice(0, 10);
+
+  document.getElementById('graficosTopo').innerHTML = `
+    <div class="card">
+      <div class="cardh"><i class="ti ti-chart-donut"></i> Composição do rebanho</div>
+      <div class="cardb" style="display:flex;justify-content:center"><div style="max-width:220px;width:100%"><canvas id="chartComposicao"></canvas></div></div>
+    </div>
+    <div class="card">
+      <div class="cardh"><i class="ti ti-trophy"></i> Ranking de lotes — maior ganho de peso</div>
+      <div class="cardb table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>Lote</th><th>Fazenda</th><th>Animais</th><th>GMD médio</th><th>Ganho total</th></tr></thead>
+          <tbody>
+            ${ranking.length === 0
+              ? '<tr class="empty-row"><td colspan="6">Sem pesagens suficientes ainda.</td></tr>'
+              : ranking.map((l, i) => `
+                <tr>
+                  <td>${i + 1}º</td>
+                  <td><b style="color:var(--text)">${l.lote_nome}</b></td>
+                  <td>${l.fazenda_nome}</td>
+                  <td>${l.qtd}</td>
+                  <td style="color:var(--success)">${l.gmdMedio.toFixed(2)} kg/d</td>
+                  <td>${l.ganhoTotal.toLocaleString('pt-BR')} kg</td>
+                </tr>
+              `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  if (chartComposicaoInstance) chartComposicaoInstance.destroy();
+  const ctx = document.getElementById('chartComposicao');
+  if (categorias.length === 0) return;
+
+  chartComposicaoInstance = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: categorias,
+      datasets: [{
+        data: categorias.map(c => porCategoria[c]),
+        backgroundColor: categorias.map(c => corCategoria(c)),
+        borderWidth: 0,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      aspectRatio: 1,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: getComputedStyle(document.documentElement).getPropertyValue('--text-soft'), boxWidth: 10, font: { size: 10 } } },
+      },
+    },
+  });
+}
+
+function renderEvolucaoRebanho(todos) {
+  const hoje = new Date();
+  const meses = [];
+
+  if (todos.length === 0) {
+    meses.push(new Date(hoje.getFullYear(), hoje.getMonth(), 1));
+  } else {
+    const datasEntrada = todos.map(a => new Date(a.data_entrada + 'T00:00:00'));
+    const primeiraEntrada = new Date(Math.min(...datasEntrada));
+    const inicio = new Date(primeiraEntrada.getFullYear(), primeiraEntrada.getMonth(), 1);
+    const fim = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+
+    let cursor = new Date(inicio);
+    // limite de segurança pra não gerar um eixo absurdamente longo se a data de entrada estiver muito no passado
+    let limiteSeguranca = 60;
+    while (cursor <= fim && limiteSeguranca > 0) {
+      meses.push(new Date(cursor));
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+      limiteSeguranca--;
+    }
+  }
+
+  const categoriasPresentes = new Set();
+  todos.forEach(a => categoriasPresentes.add(categoriaLabel(a.categoria)));
+  const categorias = [...categoriasPresentes];
+
+  const datasets = categorias.map(cat => {
+    const dados = meses.map(mesInicio => {
+      const fimMes = new Date(mesInicio.getFullYear(), mesInicio.getMonth() + 1, 0);
+      const limite = fimMes > hoje ? hoje : fimMes;
+
+      return todos.filter(a => {
+        if (categoriaLabel(a.categoria) !== cat) return false;
+        const entrada = new Date(a.data_entrada + 'T00:00:00');
+        if (entrada > limite) return false;
+        if (a.status === 'ativo') return true;
+        if (a.status === 'vendido' && a.data_venda) return new Date(a.data_venda + 'T00:00:00') > limite;
+        if (a.status === 'morto' && a.data_morte) return new Date(a.data_morte + 'T00:00:00') > limite;
+        return false;
+      }).length;
+    });
+
+    const cor = corCategoria(cat);
+    return { label: cat, data: dados, borderColor: cor, backgroundColor: cor, tension: 0.3, pointRadius: 2 };
+  });
+
+  if (chartEvolucaoInstance) chartEvolucaoInstance.destroy();
+  const ctx = document.getElementById('chartEvolucao');
+  const corEixo = getComputedStyle(document.documentElement).getPropertyValue('--text-dim');
+  const corGrid = getComputedStyle(document.documentElement).getPropertyValue('--divider');
+
+  chartEvolucaoInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: meses.map(d => d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })),
+      datasets,
+    },
+    options: {
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top', labels: { color: corEixo, boxWidth: 12, font: { size: 11 } } },
+      },
+      scales: {
+        x: { ticks: { color: corEixo }, grid: { color: corGrid } },
+        y: { ticks: { color: corEixo }, grid: { color: corGrid }, beginAtZero: true },
+      },
+    },
+  });
+}
+
+function renderSemPesagemEMangas(ativos) {
+  const hoje = new Date();
+  const faixas = [
+    { label: 'Até 15 dias', min: 0, max: 15, cor: 'var(--success)' },
+    { label: '16 a 30 dias', min: 16, max: 30, cor: 'var(--info)' },
+    { label: '31 a 60 dias', min: 31, max: 60, cor: 'var(--warning)' },
+    { label: '61 a 90 dias', min: 61, max: 90, cor: '#e0863a' },
+    { label: 'Mais de 90 dias', min: 91, max: Infinity, cor: 'var(--danger)' },
+  ];
+
+  const contagem = faixas.map(f => 0);
+  ativos.forEach(a => {
+    if (!a.data_ultimo_peso) return;
+    const dias = Math.round((hoje - new Date(a.data_ultimo_peso + 'T00:00:00')) / 86400000);
+    const idx = faixas.findIndex(f => dias >= f.min && dias <= f.max);
+    if (idx >= 0) contagem[idx]++;
+  });
+  const maxContagem = Math.max(1, ...contagem);
+
+  document.getElementById('graficosBaixo').innerHTML = `
+    <div class="card">
+      <div class="cardh"><i class="ti ti-calendar-off"></i> Animais sem pesagem recente</div>
+      <div class="cardb">
+        ${faixas.map((f, i) => `
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span style="font-size:12px;color:var(--text-soft);min-width:110px">${f.label}</span>
+            <div style="background:var(--track-bg);border-radius:3px;height:14px;flex:1;overflow:hidden">
+              <div style="height:100%;border-radius:3px;width:${(contagem[i] / maxContagem) * 100}%;background:${f.cor}"></div>
+            </div>
+            <span style="font-size:12px;color:var(--text);min-width:24px;text-align:right">${contagem[i]}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+    <div class="card" id="cardOcupacaoMangas">
+      <div class="cardh">Ocupação das mangas</div>
+      <div class="cardb" id="conteudoOcupacaoMangas"><span class="spinner"></span></div>
+    </div>
+  `;
+
+  carregarOcupacaoMangas();
+}
+
+async function carregarOcupacaoMangas() {
+  const { data: mangas } = await supabaseClient.from('vw_mangas_ocupacao').select('*');
+
+  const mangasFiltradas = fazendasSelecionadas.size === 0
+    ? (mangas || [])
+    : (mangas || []).filter(m => fazendasSelecionadas.has(m.fazenda_id));
+
+  document.getElementById('conteudoOcupacaoMangas').innerHTML = mangasFiltradas.length === 0
+    ? '<p style="color:var(--text-dim);font-size:13px">Nenhuma manga cadastrada nessa seleção.</p>'
+    : mangasFiltradas.map(m => `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-size:12px;color:var(--text-soft);min-width:90px">Manga ${m.numero}</span>
+          <div style="background:var(--track-bg);border-radius:3px;height:14px;flex:1;overflow:hidden">
+            <div style="height:100%;border-radius:3px;width:${m.percentual_ocupacao || 0}%;background:var(--warning)"></div>
+          </div>
+          <span style="font-size:12px;color:var(--text);min-width:38px;text-align:right">${m.percentual_ocupacao || 0}%</span>
+        </div>
+      `).join('');
+}
+
+carregarPainel();
+</script>
+
+</body>
+</html>

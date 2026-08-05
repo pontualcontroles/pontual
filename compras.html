@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agropecuária Pontual — Compras</title>
+<link rel="icon" href="logo-pontual.png" type="image/png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<script src="supabase-config.js"></script>
+<script src="layout.js"></script>
+<script>
+renderTopbarSidebar('compras');
+
+document.getElementById('mainContent').innerHTML = `
+  <div class="pagehead">
+    <div>
+      <div class="pagetitle">Compras</div>
+      <div class="pagesub" id="totalCompras">Carregando...</div>
+    </div>
+  </div>
+
+  <div class="subtoggle">
+    <button class="stbtn active" id="btnTabLista" onclick="mostrarAba('lista')">Lista de compras</button>
+    <button class="stbtn" id="btnTabCadastro" onclick="mostrarAba('cadastro')">Cadastrar compra</button>
+  </div>
+
+  <div id="abaLista">
+    <div class="card">
+      <div class="cardb table-wrap">
+        <table>
+          <thead>
+            <tr><th>Código</th><th>Data</th><th>Vendedor</th><th>Valor total</th><th>Frete</th><th>Animais</th><th>Peso total</th><th>Comissão</th><th></th></tr>
+          </thead>
+          <tbody id="tabelaCompras">
+            <tr class="empty-row"><td colspan="9"><span class="spinner"></span> Carregando...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="abaCadastro" style="display:none">
+    <div id="msgCadastro" class="msg"></div>
+
+    <div class="card">
+      <div class="cardh">Identificação</div>
+      <div class="cardb">
+        <div class="frow cols-3">
+          <div class="fgroup"><label>Data da compra *</label><input id="c_data_compra" type="date"></div>
+          <div class="fgroup"><label>Vendedor / Produtor</label><input id="c_vendedor" placeholder="Nome do vendedor"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardh">Valores</div>
+      <div class="cardb">
+        <div class="frow cols-3">
+          <div class="fgroup"><label>Valor total (R$) *</label><input id="c_valor_total" type="number" step="0.01" placeholder="45000"></div>
+          <div class="fgroup"><label>Frete total (R$)</label><input id="c_frete_total" type="number" step="0.01" placeholder="0"></div>
+          <div class="fgroup"><label>Valor de comissão (R$)</label><input id="c_valor_comissao" type="number" step="0.01" placeholder="0"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardh">Observações</div>
+      <div class="cardb">
+        <div class="frow cols-1">
+          <div class="fgroup"><textarea id="c_observacoes" placeholder="Observações sobre a negociação..."></textarea></div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" id="btnSalvarCompra">Cadastrar compra</button>
+          <button class="btn btn-secondary" onclick="limparFormulario()">Limpar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+`;
+
+let compraEditandoId = null;
+
+// ---------- Navegação ----------
+function mostrarAba(aba) {
+  document.getElementById('abaLista').style.display = aba === 'lista' ? 'block' : 'none';
+  document.getElementById('abaCadastro').style.display = aba === 'cadastro' ? 'block' : 'none';
+  document.getElementById('btnTabLista').classList.toggle('active', aba === 'lista');
+  document.getElementById('btnTabCadastro').classList.toggle('active', aba === 'cadastro');
+  if (aba === 'lista') carregarCompras();
+}
+
+function limparFormulario() {
+  compraEditandoId = null;
+  ['c_vendedor','c_valor_total','c_frete_total','c_valor_comissao','c_observacoes'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('c_data_compra').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('btnSalvarCompra').textContent = 'Cadastrar compra';
+  document.getElementById('msgCadastro').className = 'msg';
+}
+
+function showMsg(elId, text, type) {
+  const el = document.getElementById(elId);
+  el.textContent = text;
+  el.className = 'msg show ' + type;
+  setTimeout(() => { el.className = 'msg'; }, 4000);
+}
+
+// ---------- Lista ----------
+async function carregarCompras() {
+  const { data: compras, error } = await supabaseClient
+    .from('vw_compras_resumo')
+    .select('*')
+    .order('data_compra', { ascending: false });
+
+  if (error) {
+    document.getElementById('tabelaCompras').innerHTML = `<tr class="empty-row"><td colspan="8">Erro ao carregar: ${error.message}</td></tr>`;
+    return;
+  }
+
+  document.getElementById('totalCompras').textContent = `${compras.length} compra${compras.length === 1 ? '' : 's'} registrada${compras.length === 1 ? '' : 's'}`;
+
+  if (compras.length === 0) {
+    document.getElementById('tabelaCompras').innerHTML = '<tr class="empty-row"><td colspan="9">Nenhuma compra cadastrada ainda.</td></tr>';
+    return;
+  }
+
+  const { data: codigos } = await supabaseClient.from('compras').select('id, codigo');
+  const mapaCodigos = new Map((codigos || []).map(c => [c.id, c.codigo]));
+
+  document.getElementById('tabelaCompras').innerHTML = compras.map(c => `
+      <tr>
+        <td><b style="color:var(--text)">#${mapaCodigos.get(c.id) ?? '—'}</b></td>
+        <td>${new Date(c.data_compra + 'T00:00:00').toLocaleDateString('pt-BR')}</td>
+        <td><b style="color:var(--text)">${c.vendedor || '—'}</b></td>
+        <td>${c.valor_total !== null ? 'R$ ' + Number(c.valor_total).toLocaleString('pt-BR') : '—'}</td>
+        <td>${c.frete_total ? 'R$ ' + Number(c.frete_total).toLocaleString('pt-BR') : '—'}</td>
+        <td>${c.qtd_animais || 0}</td>
+        <td>${Number(c.peso_total_entrada || 0).toLocaleString('pt-BR')} kg</td>
+        <td>${c.valor_comissao ? 'R$ ' + Number(c.valor_comissao).toLocaleString('pt-BR') : '—'}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-secondary" style="padding:4px 10px" title="Editar" onclick="editarCompra('${c.id}')"><i class="ti ti-pencil"></i></button>
+          <button class="btn btn-danger" style="padding:4px 10px" title="Excluir" onclick="excluirCompra('${c.id}','${(c.vendedor || 'compra').replace(/'/g, "\\'")}')"><i class="ti ti-trash"></i></button>
+        </td>
+      </tr>
+    `).join('');
+}
+
+// ---------- CRUD compra ----------
+async function editarCompra(id) {
+  const { data: c, error } = await supabaseClient.from('compras').select('*').eq('id', id).single();
+  if (error) { alert('Erro ao carregar compra: ' + error.message); return; }
+
+  compraEditandoId = id;
+  mostrarAba('cadastro');
+
+  document.getElementById('c_data_compra').value = c.data_compra || '';
+  document.getElementById('c_vendedor').value = c.vendedor || '';
+  document.getElementById('c_valor_total').value = c.valor_total || '';
+  document.getElementById('c_frete_total').value = c.frete_total || '';
+  document.getElementById('c_valor_comissao').value = c.valor_comissao || '';
+  document.getElementById('c_observacoes').value = c.observacoes || '';
+  document.getElementById('btnSalvarCompra').textContent = 'Salvar alterações';
+}
+
+async function excluirCompra(id, vendedor) {
+  const { data: vinculados } = await supabaseClient.from('animais').select('id').eq('compra_id', id);
+  if (vinculados && vinculados.length > 0) {
+    alert(`Não é possível excluir: existem ${vinculados.length} animal(is) vinculado(s) a essa compra. Remova o vínculo nos animais primeiro.`);
+    return;
+  }
+
+  if (!confirm(`Excluir a compra de "${vendedor}"?`)) return;
+
+  const { error } = await supabaseClient.from('compras').delete().eq('id', id);
+  if (error) {
+    alert('Não foi possível excluir: ' + error.message);
+    return;
+  }
+  carregarCompras();
+}
+
+async function salvarCompra() {
+  const dataCompra = document.getElementById('c_data_compra').value;
+  const valorTotal = document.getElementById('c_valor_total').value;
+
+  if (!dataCompra) { showMsg('msgCadastro', 'A data da compra é obrigatória.', 'error'); return; }
+  if (!valorTotal) { showMsg('msgCadastro', 'O valor total é obrigatório.', 'error'); return; }
+
+  const payload = {
+    data_compra: dataCompra,
+    vendedor: document.getElementById('c_vendedor').value.trim() || null,
+    valor_total: Number(valorTotal),
+    frete_total: document.getElementById('c_frete_total').value ? Number(document.getElementById('c_frete_total').value) : 0,
+    valor_comissao: document.getElementById('c_valor_comissao').value ? Number(document.getElementById('c_valor_comissao').value) : 0,
+    observacoes: document.getElementById('c_observacoes').value.trim() || null,
+  };
+
+  const btn = document.getElementById('btnSalvarCompra');
+  btn.disabled = true;
+
+  if (compraEditandoId) {
+    const { error } = await supabaseClient.from('compras').update(payload).eq('id', compraEditandoId);
+    btn.disabled = false;
+    if (error) { showMsg('msgCadastro', 'Erro ao salvar: ' + error.message, 'error'); return; }
+    showMsg('msgCadastro', 'Compra atualizada com sucesso!', 'success');
+  } else {
+    const { data: nova, error } = await supabaseClient.from('compras').insert(payload).select('id, codigo').single();
+    btn.disabled = false;
+    if (error) {
+      showMsg('msgCadastro', 'Erro ao salvar: ' + error.message, 'error');
+      return;
+    }
+    showMsg('msgCadastro', `Compra cadastrada com sucesso! Código: #${nova.codigo} — use esse número ao vincular os animais.`, 'success');
+  }
+
+  limparFormulario();
+  mostrarAba('lista');
+}
+
+document.getElementById('btnSalvarCompra').addEventListener('click', salvarCompra);
+
+(async function init() {
+  await checkAuth();
+  showUserEmail();
+  document.getElementById('c_data_compra').value = new Date().toISOString().slice(0, 10);
+  carregarCompras();
+})();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agropecuária Pontual — Mangas</title>
+<link rel="icon" href="logo-pontual.png" type="image/png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+
+<script src="supabase-config.js"></script>
+<script src="layout.js"></script>
+<script>
+renderTopbarSidebar('mangas');
+
+document.getElementById('mainContent').innerHTML = `
+  <div class="pagehead">
+    <div>
+      <div class="pagetitle">Mangas</div>
+      <div class="pagesub" id="totalMangas">Carregando...</div>
+    </div>
+  </div>
+
+  <div class="subtoggle">
+    <button class="stbtn active" id="btnTabDashboard" onclick="mostrarAba('dashboard')">Dashboard</button>
+    <button class="stbtn" id="btnTabLista" onclick="mostrarAba('lista')">Lista de mangas</button>
+    <button class="stbtn" id="btnTabMapa" onclick="mostrarAba('mapa')">Mapa</button>
+    <button class="stbtn" id="btnTabCadastro" onclick="mostrarAba('cadastro')">Cadastrar manga</button>
+  </div>
+
+  <div id="abaLista" style="display:none">
+    <div class="card">
+      <div class="cardb table-wrap">
+        <table>
+          <thead>
+            <tr><th>Manga</th><th>Fazenda</th><th>Animais ativos</th><th></th></tr>
+          </thead>
+          <tbody id="tabelaMangas">
+            <tr class="empty-row"><td colspan="4"><span class="spinner"></span> Carregando...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="abaMapa" style="display:none">
+    <div class="card">
+      <div class="cardh"><i class="ti ti-map-2"></i> Localização das mangas</div>
+      <div class="cardb">
+        <p style="font-size:13px;color:var(--text-dim);margin:0 0 10px">Clique num pino pra ver quantos animais estão naquela manga agora. Só aparecem mangas com localização cadastrada.</p>
+        <div id="mapaMangas" style="height:520px;border-radius:8px"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="abaCadastro" style="display:none">
+    <div id="msgCadastro" class="msg"></div>
+    <div class="card">
+      <div class="cardh">Identificação</div>
+      <div class="cardb">
+        <div class="frow">
+          <div class="fgroup"><label>Número da manga *</label><input id="m_numero" placeholder="01"></div>
+          <div class="fgroup">
+            <label>Fazenda *</label>
+            <select id="m_fazenda_id"><option value="">Carregando fazendas...</option></select>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" id="btnSalvarManga">Cadastrar manga</button>
+          <button class="btn btn-secondary" onclick="limparFormulario()">Limpar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardh"><i class="ti ti-map-pin"></i> Localização no mapa (opcional)</div>
+      <div class="cardb">
+        <p style="font-size:13px;color:var(--text-dim);margin:0 0 10px">Clique no ponto exato da manga no mapa de satélite abaixo pra marcar a localização. Dá pra buscar um endereço/cidade na busca do mapa antes de clicar.</p>
+        <div id="mapaEscolherLocal" style="height:360px;border-radius:8px;margin-bottom:10px"></div>
+        <div class="frow cols-3">
+          <div class="fgroup"><label>Latitude</label><input id="m_latitude" type="number" step="any" placeholder="-19.123456"></div>
+          <div class="fgroup"><label>Longitude</label><input id="m_longitude" type="number" step="any" placeholder="-45.123456"></div>
+          <div class="fgroup" style="justify-content:flex-end">
+            <button class="btn btn-secondary" type="button" onclick="limparLocalizacaoManga()">Remover localização</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="abaDashboard">
+    <div class="toolbar">
+      <select id="filtroFazendaDashManga" onchange="aoMudarFazendaDashManga()"><option value="">Todas as fazendas</option></select>
+      <select id="filtroMangaDash" onchange="renderDashboardManga()"><option value="">Todas as mangas</option></select>
+    </div>
+
+    <div class="metrics" id="metricasDashManga">
+      <div class="metric"><span class="spinner"></span></div>
+    </div>
+    <div class="metrics" id="metricasDashManga2" style="margin-top:-4px"></div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="card">
+        <div class="cardh"><i class="ti ti-chart-donut"></i> Composição da manga</div>
+        <div class="cardb" style="display:flex;justify-content:center"><div style="max-width:220px;width:100%"><canvas id="chartComposicaoManga"></canvas></div></div>
+      </div>
+      <div class="card">
+        <div class="cardh"><i class="ti ti-stack-2"></i> Animais por lote</div>
+        <div class="cardb" id="conteudoLotesManga"><span class="spinner"></span></div>
+      </div>
+    </div>
+  </div>
+`;
+
+let mangaEditandoId = null;
+
+function mostrarAba(aba) {
+  document.getElementById('abaLista').style.display = aba === 'lista' ? 'block' : 'none';
+  document.getElementById('abaMapa').style.display = aba === 'mapa' ? 'block' : 'none';
+  document.getElementById('abaCadastro').style.display = aba === 'cadastro' ? 'block' : 'none';
+  document.getElementById('abaDashboard').style.display = aba === 'dashboard' ? 'block' : 'none';
+  document.getElementById('btnTabLista').classList.toggle('active', aba === 'lista');
+  document.getElementById('btnTabMapa').classList.toggle('active', aba === 'mapa');
+  document.getElementById('btnTabCadastro').classList.toggle('active', aba === 'cadastro');
+  document.getElementById('btnTabDashboard').classList.toggle('active', aba === 'dashboard');
+  if (aba === 'lista') carregarMangas();
+  if (aba === 'mapa') carregarMapaMangas();
+  if (aba === 'cadastro') { carregarFazendasNoSelect(); setTimeout(inicializarMapaPicker, 0); }
+  if (aba === 'dashboard') carregarDashboardMangas();
+}
+
+function limparFormulario() {
+  mangaEditandoId = null;
+  document.getElementById('m_numero').value = '';
+  document.getElementById('m_fazenda_id').value = '';
+  document.getElementById('m_latitude').value = '';
+  document.getElementById('m_longitude').value = '';
+  document.getElementById('btnSalvarManga').textContent = 'Cadastrar manga';
+  document.getElementById('msgCadastro').className = 'msg';
+  removerMarcadorPicker();
+}
+
+function limparLocalizacaoManga() {
+  document.getElementById('m_latitude').value = '';
+  document.getElementById('m_longitude').value = '';
+  removerMarcadorPicker();
+}
+
+function showMsg(text, type) {
+  const el = document.getElementById('msgCadastro');
+  el.textContent = text;
+  el.className = 'msg show ' + type;
+  setTimeout(() => { el.className = 'msg'; }, 4000);
+}
+
+async function carregarFazendasNoSelect() {
+  const sel = document.getElementById('m_fazenda_id');
+  const valorAtual = sel.value;
+
+  const { data: fazendas, error } = await supabaseClient
+    .from('fazendas')
+    .select('id, nome')
+    .order('nome');
+
+  if (error) {
+    sel.innerHTML = `<option value="">Erro ao carregar fazendas</option>`;
+    return;
+  }
+
+  if (!fazendas || fazendas.length === 0) {
+    sel.innerHTML = `<option value="">Nenhuma fazenda cadastrada — cadastre uma primeiro</option>`;
+    return;
+  }
+
+  sel.innerHTML = `<option value="">Selecione...</option>` +
+    fazendas.map(f => `<option value="${f.id}">${f.nome}</option>`).join('');
+
+  if (valorAtual) sel.value = valorAtual;
+}
+
+async function carregarMangas() {
+  const { data: mangas, error } = await supabaseClient
+    .from('vw_mangas_ocupacao')
+    .select('id, numero, fazenda_nome')
+    .order('numero');
+
+  if (error) {
+    document.getElementById('tabelaMangas').innerHTML = `<tr class="empty-row"><td colspan="4">Erro ao carregar: ${error.message}</td></tr>`;
+    return;
+  }
+
+  document.getElementById('totalMangas').textContent = `${mangas.length} manga${mangas.length === 1 ? '' : 's'} cadastrada${mangas.length === 1 ? '' : 's'}`;
+
+  if (mangas.length === 0) {
+    document.getElementById('tabelaMangas').innerHTML = '<tr class="empty-row"><td colspan="4">Nenhuma manga cadastrada ainda.</td></tr>';
+    return;
+  }
+
+  const animais = await buscarPaginado(() => supabaseClient.from('animais').select('manga_id, status'));
+  const contagem = {};
+  (animais || []).forEach(a => {
+    if (a.status === 'ativo' && a.manga_id) contagem[a.manga_id] = (contagem[a.manga_id] || 0) + 1;
+  });
+
+  document.getElementById('tabelaMangas').innerHTML = mangas.map(m => `
+      <tr>
+        <td><b style="color:var(--text)">Manga ${m.numero}</b></td>
+        <td>${m.fazenda_nome || '—'}</td>
+        <td>${contagem[m.id] || 0}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-secondary" style="padding:4px 10px" onclick="editarManga('${m.id}')"><i class="ti ti-pencil"></i></button>
+          <button class="btn btn-danger" style="padding:4px 10px" onclick="excluirManga('${m.id}','Manga ${m.numero}')"><i class="ti ti-trash"></i></button>
+        </td>
+      </tr>
+    `).join('');
+}
+
+async function editarManga(id) {
+  const { data: m, error } = await supabaseClient.from('mangas').select('*').eq('id', id).single();
+  if (error) { alert('Erro ao carregar manga: ' + error.message); return; }
+
+  mangaEditandoId = id;
+  mostrarAba('cadastro');
+
+  // espera o select de fazendas carregar antes de definir o valor
+  await carregarFazendasNoSelect();
+
+  document.getElementById('m_numero').value = m.numero || '';
+  document.getElementById('m_fazenda_id').value = m.fazenda_id || '';
+  document.getElementById('m_latitude').value = m.latitude ?? '';
+  document.getElementById('m_longitude').value = m.longitude ?? '';
+  document.getElementById('btnSalvarManga').textContent = 'Salvar alterações';
+
+  setTimeout(() => {
+    inicializarMapaPicker();
+    if (m.latitude != null && m.longitude != null) {
+      posicionarMarcadorPicker(m.latitude, m.longitude);
+      mapaPickerInstance.setView([m.latitude, m.longitude], 16);
+    }
+  }, 0);
+}
+
+async function excluirManga(id, nome) {
+  if (!confirm(`Excluir a "${nome}"? Essa ação não pode ser desfeita.`)) return;
+
+  const { error } = await supabaseClient.from('mangas').delete().eq('id', id);
+  if (error) {
+    alert('Não foi possível excluir: ' + error.message + '\n\nVerifique se ainda existem animais nessa manga.');
+    return;
+  }
+  carregarMangas();
+}
+
+async function salvarManga() {
+  const numero = document.getElementById('m_numero').value.trim();
+  const fazendaId = document.getElementById('m_fazenda_id').value;
+  const latStr = document.getElementById('m_latitude').value.trim();
+  const lngStr = document.getElementById('m_longitude').value.trim();
+  const latitude = latStr ? Number(latStr) : null;
+  const longitude = lngStr ? Number(lngStr) : null;
+
+  if (!numero) { showMsg('O número da manga é obrigatório.', 'error'); return; }
+  if (!fazendaId) { showMsg('Selecione a fazenda.', 'error'); return; }
+  if ((latStr && !lngStr) || (!latStr && lngStr)) { showMsg('Preencha latitude e longitude juntas (ou deixe as duas em branco).', 'error'); return; }
+
+  const btn = document.getElementById('btnSalvarManga');
+  btn.disabled = true;
+
+  let error;
+  if (mangaEditandoId) {
+    // não mexe em capacidade/tipo_estrutura — campos removidos da UI, preserva o que já estava salvo
+    ({ error } = await supabaseClient.from('mangas').update({ numero, fazenda_id: fazendaId, latitude, longitude }).eq('id', mangaEditandoId));
+  } else {
+    // capacidade não é mais controlada pela UI, mas a coluna ainda exige um valor — usa um valor alto neutro
+    ({ error } = await supabaseClient.from('mangas').insert({ numero, fazenda_id: fazendaId, capacidade: 9999, tipo_estrutura: null, latitude, longitude }));
+  }
+
+  btn.disabled = false;
+
+  if (error) {
+    const msg = error.code === '23505'
+      ? 'Já existe uma manga com esse número nessa fazenda.'
+      : 'Erro ao salvar: ' + error.message;
+    showMsg(msg, 'error');
+    return;
+  }
+
+  showMsg(mangaEditandoId ? 'Manga atualizada com sucesso!' : 'Manga cadastrada com sucesso!', 'success');
+  limparFormulario();
+  mostrarAba('lista');
+}
+
+document.getElementById('btnSalvarManga').addEventListener('click', salvarManga);
+
+// ---------- Mapa (satélite) ----------
+// Esri World Imagery — satélite grátis, sem precisar de chave de API.
+const CAMADA_SATELITE_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+const CAMADA_SATELITE_ATRIBUICAO = 'Tiles &copy; Esri';
+const CENTRO_PADRAO = [-19.9, -44.0]; // aproximado, só usado quando ainda não tem nenhuma manga com local
+
+let mapaPickerInstance = null;
+let marcadorPicker = null;
+
+function inicializarMapaPicker() {
+  if (mapaPickerInstance) { mapaPickerInstance.invalidateSize(); return; }
+  mapaPickerInstance = L.map('mapaEscolherLocal').setView(CENTRO_PADRAO, 12);
+  L.tileLayer(CAMADA_SATELITE_URL, { attribution: CAMADA_SATELITE_ATRIBUICAO, maxZoom: 19 }).addTo(mapaPickerInstance);
+  mapaPickerInstance.on('click', (e) => {
+    posicionarMarcadorPicker(e.latlng.lat, e.latlng.lng);
+    document.getElementById('m_latitude').value = e.latlng.lat.toFixed(6);
+    document.getElementById('m_longitude').value = e.latlng.lng.toFixed(6);
+  });
+}
+
+function posicionarMarcadorPicker(lat, lng) {
+  if (!mapaPickerInstance) return;
+  if (marcadorPicker) mapaPickerInstance.removeLayer(marcadorPicker);
+  marcadorPicker = L.marker([lat, lng]).addTo(mapaPickerInstance);
+}
+
+function removerMarcadorPicker() {
+  if (marcadorPicker && mapaPickerInstance) { mapaPickerInstance.removeLayer(marcadorPicker); marcadorPicker = null; }
+}
+
+// Digitar lat/lng direto também move o pino, pra quem já tem a coordenada de outro lugar (GPS, drone etc)
+function aoDigitarCoordenadaManual() {
+  const lat = Number(document.getElementById('m_latitude').value);
+  const lng = Number(document.getElementById('m_longitude').value);
+  if (!lat || !lng || !mapaPickerInstance) return;
+  posicionarMarcadorPicker(lat, lng);
+  mapaPickerInstance.setView([lat, lng], 16);
+}
+document.getElementById('m_latitude').addEventListener('change', aoDigitarCoordenadaManual);
+document.getElementById('m_longitude').addEventListener('change', aoDigitarCoordenadaManual);
+
+let mapaMangasInstance = null;
+
+async function carregarMapaMangas() {
+  const container = document.getElementById('mapaMangas');
+
+  const [{ data: mangas, error }, { data: fazendas }, animais] = await Promise.all([
+    supabaseClient.from('mangas').select('id, numero, fazenda_id, latitude, longitude'),
+    supabaseClient.from('fazendas').select('id, nome'),
+    buscarPaginado(() => supabaseClient.from('animais').select('manga_id, status')),
+  ]);
+
+  if (error) { container.innerHTML = `<p style="color:var(--text-dim)">Erro ao carregar mangas: ${error.message}</p>`; return; }
+
+  const fazendaNomePorId = {};
+  (fazendas || []).forEach(f => { fazendaNomePorId[f.id] = f.nome; });
+
+  const contagem = {};
+  (animais || []).forEach(a => {
+    if (a.status === 'ativo' && a.manga_id) contagem[a.manga_id] = (contagem[a.manga_id] || 0) + 1;
+  });
+
+  const comLocal = (mangas || []).filter(m => m.latitude != null && m.longitude != null);
+
+  if (mapaMangasInstance) { mapaMangasInstance.remove(); mapaMangasInstance = null; }
+  mapaMangasInstance = L.map('mapaMangas');
+  L.tileLayer(CAMADA_SATELITE_URL, { attribution: CAMADA_SATELITE_ATRIBUICAO, maxZoom: 19 }).addTo(mapaMangasInstance);
+
+  if (comLocal.length === 0) {
+    mapaMangasInstance.setView(CENTRO_PADRAO, 6);
+    return;
+  }
+
+  const marcadores = comLocal.map(m => {
+    const qtd = contagem[m.id] || 0;
+    const fazendaNome = fazendaNomePorId[m.fazenda_id] || '—';
+    return L.marker([m.latitude, m.longitude]).bindPopup(
+      `<b>Manga ${m.numero}</b><br>${fazendaNome}<br>${qtd} animal${qtd === 1 ? '' : 'is'} ativo${qtd === 1 ? '' : 's'}`
+    );
+  });
+
+  const grupo = L.featureGroup(marcadores).addTo(mapaMangasInstance);
+  mapaMangasInstance.fitBounds(grupo.getBounds(), { padding: [30, 30], maxZoom: 15 });
+}
+
+// ---------- Dashboard ----------
+const PALETA_CATEGORIAS = {
+  'Bezerro': '#4a9eff', 'Bezerra': '#ff8fb3', 'Garrote': '#f0b840', 'Novilho': '#4dd4a0',
+  'Novilha': '#a87fe0', 'Boi': '#1a4a8a', 'Vaca': '#d63b6e', 'Touro': '#2d6e4e',
+  'Matrona': '#8a5a2b', 'Vaca seca': '#7a7a7a', 'Sem categoria': '#5a7fa0',
+};
+function categoriaLabelDash(c) { return c || 'Sem categoria'; }
+function corCategoriaDash(c) { return PALETA_CATEGORIAS[categoriaLabelDash(c)] || '#5a7fa0'; }
+
+let mangasCacheDash = [];
+let fazendasCacheDashManga = [];
+let animaisCacheDash = [];
+let chartComposicaoMangaInstance = null;
+
+async function carregarDashboardMangas() {
+  const [{ data: mangas }, { data: fazendas }, animais, pesagens] = await Promise.all([
+    supabaseClient.from('mangas').select('id, numero, fazenda_id').order('numero'),
+    supabaseClient.from('fazendas').select('id, nome').order('nome'),
+    buscarPaginado(() => supabaseClient.from('vw_animais_resumo').select('*')),
+    buscarPaginado(() => supabaseClient.from('pesagens').select('animal_id, data_pesagem, gmd_periodo').order('data_pesagem', { ascending: false })),
+  ]);
+
+  mangasCacheDash = mangas || [];
+  fazendasCacheDashManga = fazendas || [];
+
+  const gmdPeriodoPorAnimal = new Map();
+  (pesagens || []).forEach(p => {
+    if (!gmdPeriodoPorAnimal.has(p.animal_id)) gmdPeriodoPorAnimal.set(p.animal_id, p.gmd_periodo);
+  });
+
+  animaisCacheDash = (animais || []).map(a => ({
+    ...a,
+    gmdt: a.gmd_atual,
+    gmd_ultimo: gmdPeriodoPorAnimal.has(a.id) ? gmdPeriodoPorAnimal.get(a.id) : null,
+  }));
+
+  const selFazenda = document.getElementById('filtroFazendaDashManga');
+  selFazenda.innerHTML = `<option value="">Todas as fazendas</option>` +
+    fazendasCacheDashManga.map(f => `<option value="${f.id}">${f.nome}</option>`).join('');
+
+  popularSelectMangasDash();
+  renderDashboardManga();
+}
+
+function popularSelectMangasDash() {
+  const fazendaId = document.getElementById('filtroFazendaDashManga').value;
+  const sel = document.getElementById('filtroMangaDash');
+  const valorAtual = sel.value;
+
+  const mangasDisponiveis = fazendaId ? mangasCacheDash.filter(m => m.fazenda_id === fazendaId) : mangasCacheDash;
+
+  sel.innerHTML = `<option value="">Todas as mangas</option>` +
+    mangasDisponiveis.map(m => `<option value="${m.id}">Manga ${m.numero}</option>`).join('');
+
+  if (valorAtual && mangasDisponiveis.some(m => m.id === valorAtual)) sel.value = valorAtual;
+}
+
+function aoMudarFazendaDashManga() {
+  popularSelectMangasDash();
+  renderDashboardManga();
+}
+
+function renderDashboardManga() {
+  const fazendaId = document.getElementById('filtroFazendaDashManga').value;
+  const mangaId = document.getElementById('filtroMangaDash').value;
+
+  const mangasNoFiltro = mangasCacheDash.filter(m =>
+    (!fazendaId || m.fazenda_id === fazendaId) && (!mangaId || m.id === mangaId)
+  );
+
+  const todosNoFiltro = animaisCacheDash.filter(a =>
+    (!fazendaId || a.fazenda_id === fazendaId) && (!mangaId || a.manga_id === mangaId)
+  );
+  const ativos = todosNoFiltro.filter(a => a.status === 'ativo');
+  const mortos = todosNoFiltro.filter(a => a.status === 'morto');
+
+  const pesoTotal = ativos.reduce((s, a) => s + (Number(a.peso_atual) || 0), 0);
+  const pesoMedio = ativos.length ? pesoTotal / ativos.length : 0;
+
+  const gmdValidos = ativos.filter(a => a.gmd_ultimo !== null).map(a => Number(a.gmd_ultimo));
+  const gmdMedio = gmdValidos.length ? gmdValidos.reduce((s, v) => s + v, 0) / gmdValidos.length : 0;
+
+  const gmdtValidos = ativos.filter(a => a.gmdt !== null).map(a => Number(a.gmdt));
+  const gmdtMedio = gmdtValidos.length ? gmdtValidos.reduce((s, v) => s + v, 0) / gmdtValidos.length : 0;
+
+  const fazendasNaManga = new Set(ativos.map(a => a.fazenda_id).filter(Boolean));
+
+  document.getElementById('metricasDashManga').innerHTML = `
+    <div class="metric">
+      <div class="micon bg-info"><i class="ti ti-fence"></i></div>
+      <div><div class="mlabel">Mangas</div><div class="mval">${mangasNoFiltro.length}</div></div>
+    </div>
+    <div class="metric">
+      <div class="micon bg-info"><i class="ti ti-tag"></i></div>
+      <div><div class="mlabel">Animais ativos</div><div class="mval">${ativos.length}</div></div>
+    </div>
+    <div class="metric">
+      <div class="micon bg-success"><i class="ti ti-weight"></i></div>
+      <div><div class="mlabel">Peso total</div><div class="mval">${pesoTotal.toLocaleString('pt-BR')} kg</div></div>
+    </div>
+    <div class="metric">
+      <div class="micon bg-info"><i class="ti ti-scale"></i></div>
+      <div><div class="mlabel">Peso médio</div><div class="mval">${pesoMedio.toFixed(0)} kg</div></div>
+    </div>
+  `;
+
+  document.getElementById('metricasDashManga2').innerHTML = `
+    <div class="metric">
+      <div class="micon bg-warning"><i class="ti ti-chart-line"></i></div>
+      <div><div class="mlabel">Último GMD</div><div class="mval">${gmdMedio.toFixed(2)} kg/dia</div></div>
+    </div>
+    <div class="metric">
+      <div class="micon bg-warning"><i class="ti ti-trending-up"></i></div>
+      <div><div class="mlabel">GMDT (desde a entrada)</div><div class="mval">${gmdtMedio.toFixed(2)} kg/dia</div></div>
+    </div>
+    <div class="metric">
+      <div class="micon bg-danger"><i class="ti ti-skull"></i></div>
+      <div><div class="mlabel">Mortos</div><div class="mval">${mortos.length}</div></div>
+    </div>
+    <div class="metric">
+      <div class="micon bg-info"><i class="ti ti-building-warehouse"></i></div>
+      <div><div class="mlabel">Fazendas envolvidas</div><div class="mval">${fazendasNaManga.size}</div></div>
+    </div>
+  `;
+
+  renderComposicaoManga(ativos);
+  renderLotesManga(ativos);
+}
+
+function renderComposicaoManga(ativos) {
+  const porCategoria = {};
+  ativos.forEach(a => {
+    const c = categoriaLabelDash(a.categoria);
+    porCategoria[c] = (porCategoria[c] || 0) + 1;
+  });
+  const categorias = Object.keys(porCategoria);
+
+  if (chartComposicaoMangaInstance) chartComposicaoMangaInstance.destroy();
+  const ctx = document.getElementById('chartComposicaoManga');
+  if (categorias.length === 0) {
+    ctx.getContext('2d').clearRect(0, 0, ctx.width, ctx.height);
+    return;
+  }
+
+  chartComposicaoMangaInstance = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: categorias,
+      datasets: [{
+        data: categorias.map(c => porCategoria[c]),
+        backgroundColor: categorias.map(c => corCategoriaDash(c)),
+        borderWidth: 0,
+      }],
+    },
+    plugins: [ChartDataLabels],
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      aspectRatio: 1,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: getComputedStyle(document.documentElement).getPropertyValue('--text-soft'), boxWidth: 10, font: { size: 10 } } },
+        datalabels: {
+          color: '#fff',
+          font: { weight: 'bold', size: 11 },
+          formatter: (valor, contexto) => {
+            const total = contexto.dataset.data.reduce((s, v) => s + v, 0);
+            const pct = total > 0 ? (valor / total) * 100 : 0;
+            return pct >= 5 ? pct.toFixed(0) + '%' : '';
+          },
+        },
+      },
+    },
+  });
+}
+
+function renderLotesManga(ativos) {
+  const porLote = {};
+  ativos.forEach(a => {
+    const nome = a.lote_nome || 'Sem lote';
+    porLote[nome] = (porLote[nome] || 0) + 1;
+  });
+
+  const grupos = Object.entries(porLote).map(([nome, qtd]) => ({ nome, qtd }));
+  const maxQtd = Math.max(1, ...grupos.map(g => g.qtd));
+
+  document.getElementById('conteudoLotesManga').innerHTML = grupos.length === 0
+    ? '<p style="color:var(--text-dim);font-size:13px">Nenhum animal ativo nessa seleção.</p>'
+    : grupos.map(g => `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-size:12px;color:var(--text-soft);min-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${g.nome}</span>
+          <div style="background:var(--track-bg);border-radius:3px;height:14px;flex:1;overflow:hidden">
+            <div style="height:100%;border-radius:3px;width:${(g.qtd / maxQtd) * 100}%;background:var(--accent-bg)"></div>
+          </div>
+          <span style="font-size:12px;color:var(--text);min-width:24px;text-align:right">${g.qtd}</span>
+        </div>
+      `).join('');
+}
+
+(async function init() {
+  await checkAuth();
+  showUserEmail();
+  carregarMangas();
+  carregarDashboardMangas();
+})();
+</script>
+
+</body>
+</html>

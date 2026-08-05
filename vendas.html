@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agropecuária Pontual — Vendas</title>
+<link rel="icon" href="logo-pontual.png" type="image/png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+
+<script src="supabase-config.js"></script>
+<script src="layout.js"></script>
+<script>
+renderTopbarSidebar('vendas');
+
+document.getElementById('mainContent').innerHTML = `
+  <div class="pagehead">
+    <div>
+      <div class="pagetitle">Vendas</div>
+      <div class="pagesub" id="totalVendas">Carregando...</div>
+    </div>
+  </div>
+
+  <div class="subtoggle">
+    <button class="stbtn active" id="btnTabLista" onclick="mostrarAba('lista')">Lista de vendas</button>
+    <button class="stbtn" id="btnTabCadastro" onclick="mostrarAba('cadastro')">Cadastrar venda</button>
+  </div>
+
+  <div id="abaLista">
+    <div class="toolbar">
+      <select id="filtroMesVenda" onchange="carregarFiltroDatasVenda(this.value); aplicarFiltrosVendas()"><option value="">Todos os meses</option></select>
+      <select id="filtroDataVenda" onchange="aplicarFiltrosVendas()"><option value="">Todas as datas</option></select>
+    </div>
+    <div class="card">
+      <div class="cardh" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <span>Vendas</span>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary" onclick="exportarVendasExcel()"><i class="ti ti-file-spreadsheet"></i> Excel</button>
+          <button class="btn btn-secondary" onclick="exportarVendasPdf()"><i class="ti ti-file-type-pdf"></i> PDF</button>
+        </div>
+      </div>
+      <div class="cardb table-wrap">
+        <table>
+          <thead>
+            <tr><th>Data</th><th>Comprador</th><th>Valor total</th><th>Animais</th><th>Peso médio</th><th>Valor por @</th><th>Lucro bruto</th><th>Recebimento</th><th>Situação</th><th></th></tr>
+          </thead>
+          <tbody id="tabelaVendas">
+            <tr class="empty-row"><td colspan="10"><span class="spinner"></span> Carregando...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="abaCadastro" style="display:none">
+    <div id="msgCadastro" class="msg"></div>
+
+    <div class="card">
+      <div class="cardh">Identificação</div>
+      <div class="cardb">
+        <div class="frow cols-3">
+          <div class="fgroup"><label>Data da venda *</label><input id="v_data_venda" type="date"></div>
+          <div class="fgroup"><label>Comprador</label><input id="v_comprador" placeholder="Nome do comprador"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardh">Valores</div>
+      <div class="cardb">
+        <div class="frow cols-3">
+          <div class="fgroup"><label>Valor total (R$) *</label><input id="v_valor_total" type="number" step="0.01" placeholder="60000" oninput="atualizarPreviaParcelas()"></div>
+          <div class="fgroup"><label>Frete total (R$)</label><input id="v_frete_total" type="number" step="0.01" placeholder="0"></div>
+          <div class="fgroup">
+            <label>Forma de recebimento *</label>
+            <select id="v_forma_recebimento" onchange="alternarParcelamento()">
+              <option value="">Selecione...</option>
+              <option value="Vista">À vista</option>
+              <option value="Parcelado">Parcelado</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="cardAnimaisVendidos">
+      <div class="cardh">Animais vendidos</div>
+      <div class="cardb">
+        <div class="frow cols-3">
+          <div class="fgroup">
+            <label>Fazenda</label>
+            <select id="v_filtro_fazenda" onchange="carregarLotesFiltro(this.value); carregarAnimaisDisponiveis()"><option value="">Todas</option></select>
+          </div>
+          <div class="fgroup">
+            <label>Lote</label>
+            <select id="v_filtro_lote" onchange="carregarAnimaisDisponiveis()"><option value="">Todos</option></select>
+          </div>
+          <div class="fgroup"><label>Buscar brinco</label><input id="v_filtro_brinco" placeholder="Digite o brinco..." oninput="renderTabelaAnimaisDisponiveis()"></div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;padding:10px;background:var(--bg-input);border-radius:8px">
+          <span style="font-size:12px;color:var(--text-soft)">Ou marque em lote por planilha (Brinco + Peso de saída + Valor vendido opcional):</span>
+          <a class="btn btn-secondary" href="modelo-venda.xlsx" download style="padding:5px 10px;font-size:12px"><i class="ti ti-download"></i> Modelo</a>
+          <input type="file" id="arquivoVenda" accept=".xlsx,.xls" style="font-size:12px">
+          <button class="btn btn-secondary" style="padding:5px 10px;font-size:12px" onclick="processarPlanilhaVenda()"><i class="ti ti-upload"></i> Importar</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px"><i class="ti ti-info-circle"></i> Importar só marca os animais na seleção abaixo — a venda só é registrada quando você clicar em "Cadastrar venda", no final do formulário.</div>
+        <div id="msgImportVenda" class="msg"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><input type="checkbox" id="chkSelecionarTodos" onchange="alternarSelecaoTodos(this.checked)"></th>
+                <th>Brinco</th><th>Fazenda</th><th>Lote</th><th>Peso atual</th><th>Peso de saída (kg)</th><th>Valor vendido (R$)</th>
+              </tr>
+            </thead>
+            <tbody id="tabelaAnimaisDisponiveis"><tr class="empty-row"><td colspan="7">Selecione a aba "Cadastrar venda" pra carregar.</td></tr></tbody>
+          </table>
+        </div>
+        <div style="margin-top:10px;font-size:13px;color:var(--text-soft)">
+          <b id="resumoSelecionados" style="color:var(--text)">0 animais selecionados</b> — peso total de saída: <b id="pesoTotalSelecionados" style="color:var(--text)">0 kg</b>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="cardParcelamento" style="display:none">
+      <div class="cardh">Parcelamento (a receber)</div>
+      <div class="cardb">
+        <div class="frow cols-3">
+          <div class="fgroup"><label>Quantidade de parcelas</label><input id="v_qtd_parcelas" type="number" min="1" value="2" oninput="atualizarPreviaParcelas()"></div>
+          <div class="fgroup"><label>1º vencimento</label><input id="v_primeiro_vencimento" type="date" oninput="atualizarPreviaParcelas()"></div>
+          <div class="fgroup"><label>Intervalo entre parcelas (dias)</label><input id="v_intervalo_dias" type="number" min="1" value="30" oninput="atualizarPreviaParcelas()"></div>
+        </div>
+        <button class="btn btn-secondary" onclick="gerarParcelas()" style="margin-bottom:10px"><i class="ti ti-refresh"></i> Gerar / atualizar parcelas</button>
+        <div id="previaParcelas"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardh">Observações</div>
+      <div class="cardb">
+        <div class="frow cols-1">
+          <div class="fgroup"><textarea id="v_observacoes" placeholder="Observações sobre a negociação..."></textarea></div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" id="btnSalvarVenda">Cadastrar venda</button>
+          <button class="btn btn-secondary" onclick="limparFormulario()">Limpar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: gestão de parcelas a receber -->
+  <div class="modal-overlay" id="modalParcelas" style="display:none">
+    <div class="modal-box" style="max-width:560px">
+      <div class="modal-head">
+        <span id="modalParcelasTitulo">Parcelas</span>
+        <button class="modal-close" onclick="fecharModal('modalParcelas')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="msgParcelas" class="msg"></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Valor</th><th>Vencimento</th><th>Status</th><th></th></tr></thead>
+            <tbody id="tabelaParcelas"><tr class="empty-row"><td colspan="5">Carregando...</td></tr></tbody>
+          </table>
+        </div>
+        <div class="cardh" style="padding-left:0;margin-top:14px">Adicionar parcela manual</div>
+        <div class="frow cols-3" style="margin-top:8px">
+          <div class="fgroup"><label>Nº</label><input id="np_numero" type="number" min="1"></div>
+          <div class="fgroup"><label>Valor (R$)</label><input id="np_valor" type="number" step="0.01"></div>
+          <div class="fgroup"><label>Vencimento</label><input id="np_vencimento" type="date"></div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-primary" onclick="adicionarParcelaManual()">Adicionar parcela</button>
+        <button class="btn btn-secondary" onclick="fecharModal('modalParcelas')">Fechar</button>
+      </div>
+    </div>
+  </div>
+`;
+
+let vendaEditandoId = null;
+let parcelasState = [];
+let vendaAtualParcelasId = null;
+let animaisDisponiveisCache = [];
+let animaisSelecionados = new Map(); // id -> { brinco, pesoSaida, valorVendido, comprador, dataVenda, observacoes }
+let vendasCache = [];
+let logoBase64 = null;
+const ARROBA_KG = 30; // 1 arroba = 30kg (peso vivo)
+
+function carregarLogoBase64() {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      } catch (e) {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = 'logo-pontual.png';
+  });
+}
+
+function mesLabel(chaveAnoMes) {
+  const [ano, mes] = chaveAnoMes.split('-');
+  const nomes = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  return `${nomes[parseInt(mes, 10) - 1]}/${ano}`;
+}
+
+// ---------- Navegação ----------
+function mostrarAba(aba) {
+  document.getElementById('abaLista').style.display = aba === 'lista' ? 'block' : 'none';
+  document.getElementById('abaCadastro').style.display = aba === 'cadastro' ? 'block' : 'none';
+  document.getElementById('btnTabLista').classList.toggle('active', aba === 'lista');
+  document.getElementById('btnTabCadastro').classList.toggle('active', aba === 'cadastro');
+  if (aba === 'lista') carregarVendas();
+  if (aba === 'cadastro' && !vendaEditandoId) {
+    carregarFiltrosFazendasVenda();
+    carregarAnimaisDisponiveis();
+  }
+}
+
+function limparFormulario() {
+  vendaEditandoId = null;
+  parcelasState = [];
+  animaisSelecionados = new Map();
+  ['v_comprador','v_valor_total','v_frete_total','v_observacoes'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('v_forma_recebimento').value = '';
+  document.getElementById('v_data_venda').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('v_qtd_parcelas').value = 2;
+  document.getElementById('v_intervalo_dias').value = 30;
+  document.getElementById('v_primeiro_vencimento').value = '';
+  document.getElementById('v_filtro_fazenda').value = '';
+  document.getElementById('v_filtro_lote').innerHTML = '<option value="">Todos</option>';
+  document.getElementById('v_filtro_brinco').value = '';
+  document.getElementById('cardAnimaisVendidos').style.display = 'block';
+  document.getElementById('cardParcelamento').style.display = 'none';
+  document.getElementById('previaParcelas').innerHTML = '';
+  document.getElementById('btnSalvarVenda').textContent = 'Cadastrar venda';
+  document.getElementById('msgCadastro').className = 'msg';
+  carregarAnimaisDisponiveis();
+}
+
+function showMsg(elId, text, type) {
+  const el = document.getElementById(elId);
+  el.textContent = text;
+  el.className = 'msg show ' + type;
+  setTimeout(() => { el.className = 'msg'; }, 4000);
+}
+
+function alternarParcelamento() {
+  const parcelado = document.getElementById('v_forma_recebimento').value === 'Parcelado';
+  document.getElementById('cardParcelamento').style.display = (parcelado && !vendaEditandoId) ? 'block' : 'none';
+}
+
+// ---------- Seleção de animais vendidos ----------
+async function carregarFiltrosFazendasVenda() {
+  const sel = document.getElementById('v_filtro_fazenda');
+  const { data: fazendas } = await supabaseClient.from('fazendas').select('id, nome').order('nome');
+  sel.innerHTML = `<option value="">Todas</option>` +
+    (fazendas || []).map(f => `<option value="${f.id}">${f.nome}</option>`).join('');
+}
+
+async function carregarLotesFiltro(fazendaId) {
+  const sel = document.getElementById('v_filtro_lote');
+  if (!fazendaId) {
+    sel.innerHTML = `<option value="">Todos</option>`;
+    return;
+  }
+  const { data: lotes } = await supabaseClient.from('lotes').select('id, nome').eq('fazenda_id', fazendaId).order('nome');
+  sel.innerHTML = `<option value="">Todos</option>` +
+    (lotes || []).map(l => `<option value="${l.id}">${l.nome}</option>`).join('');
+}
+
+async function carregarAnimaisDisponiveis() {
+  const fazendaId = document.getElementById('v_filtro_fazenda').value;
+  const loteId = document.getElementById('v_filtro_lote').value;
+
+  const criarQuery = () => {
+    let query = supabaseClient.from('vw_animais_resumo').select('*').eq('status', 'ativo');
+    if (fazendaId) query = query.eq('fazenda_id', fazendaId);
+    if (loteId) query = query.eq('lote_id', loteId);
+    return query.order('brinco');
+  };
+
+  let animais;
+  try {
+    animais = await buscarPaginado(criarQuery);
+  } catch (error) {
+    document.getElementById('tabelaAnimaisDisponiveis').innerHTML = `<tr class="empty-row"><td colspan="7">Erro: ${error.message}</td></tr>`;
+    return;
+  }
+
+  animaisDisponiveisCache = animais || [];
+  renderTabelaAnimaisDisponiveis();
+}
+
+function renderTabelaAnimaisDisponiveis() {
+  const busca = document.getElementById('v_filtro_brinco').value.trim().toLowerCase();
+  const lista = busca
+    ? animaisDisponiveisCache.filter(a => String(a.brinco).toLowerCase().includes(busca))
+    : animaisDisponiveisCache;
+
+  if (lista.length === 0) {
+    document.getElementById('tabelaAnimaisDisponiveis').innerHTML = '<tr class="empty-row"><td colspan="7">Nenhum animal ativo encontrado com esse filtro.</td></tr>';
+    document.getElementById('chkSelecionarTodos').checked = false;
+    atualizarResumoSelecionados();
+    return;
+  }
+
+  document.getElementById('tabelaAnimaisDisponiveis').innerHTML = lista.map(a => {
+    const selecionado = animaisSelecionados.has(a.id);
+    const pesoDefault = animaisSelecionados.get(a.id)?.pesoSaida ?? a.peso_atual ?? a.peso_entrada ?? '';
+    const valorDefault = animaisSelecionados.get(a.id)?.valorVendido ?? '';
+    return `
+      <tr>
+        <td><input type="checkbox" ${selecionado ? 'checked' : ''} onchange="toggleSelecaoAnimal('${a.id}','${a.brinco}', ${pesoDefault || 0}, this.checked)"></td>
+        <td><b style="color:var(--text)">#${a.brinco}</b></td>
+        <td>${a.fazenda_nome || '—'}</td>
+        <td>${a.lote_nome || '—'}</td>
+        <td>${a.peso_atual !== null ? Number(a.peso_atual).toLocaleString('pt-BR') + ' kg' : '—'}</td>
+        <td><input type="number" step="0.01" value="${pesoDefault}" style="width:100px" onchange="atualizarPesoSaida('${a.id}', this.value)"></td>
+        <td><input type="number" step="0.01" value="${valorDefault}" placeholder="Auto" style="width:100px" onchange="atualizarValorVendido('${a.id}', this.value)"></td>
+      </tr>
+    `;
+  }).join('');
+
+  const todosMarcados = lista.every(a => animaisSelecionados.has(a.id));
+  document.getElementById('chkSelecionarTodos').checked = todosMarcados;
+  atualizarResumoSelecionados();
+}
+
+function toggleSelecaoAnimal(id, brinco, pesoDefault, marcado) {
+  if (marcado) {
+    animaisSelecionados.set(id, { brinco, pesoSaida: pesoDefault || 0, valorVendido: null, comprador: null, dataVenda: null, observacoes: null });
+  } else {
+    animaisSelecionados.delete(id);
+  }
+  atualizarResumoSelecionados();
+}
+
+function atualizarPesoSaida(id, valor) {
+  const atual = animaisSelecionados.get(id);
+  if (atual) {
+    atual.pesoSaida = parseFloat(valor) || 0;
+    atualizarResumoSelecionados();
+  }
+}
+
+function atualizarValorVendido(id, valor) {
+  const atual = animaisSelecionados.get(id);
+  if (atual) {
+    atual.valorVendido = valor === '' ? null : (parseFloat(valor.replace(',', '.')) || null);
+    atualizarResumoSelecionados();
+  }
+}
+
+function alternarSelecaoTodos(marcarTodos) {
+  const busca = document.getElementById('v_filtro_brinco').value.trim().toLowerCase();
+  const lista = busca
+    ? animaisDisponiveisCache.filter(a => String(a.brinco).toLowerCase().includes(busca))
+    : animaisDisponiveisCache;
+
+  lista.forEach(a => {
+    if (marcarTodos) {
+      if (!animaisSelecionados.has(a.id)) {
+        animaisSelecionados.set(a.id, { brinco: a.brinco, pesoSaida: a.peso_atual ?? a.peso_entrada ?? 0, valorVendido: null, comprador: null, dataVenda: null, observacoes: null });
+      }
+    } else {
+      animaisSelecionados.delete(a.id);
+    }
+  });
+  renderTabelaAnimaisDisponiveis();
+}
+
+function atualizarResumoSelecionados() {
+  const qtd = animaisSelecionados.size;
+  let pesoTotal = 0, valorFixado = 0, qtdComValor = 0;
+  animaisSelecionados.forEach(v => {
+    pesoTotal += Number(v.pesoSaida) || 0;
+    if (v.valorVendido !== null && v.valorVendido !== undefined) { valorFixado += Number(v.valorVendido); qtdComValor++; }
+  });
+  document.getElementById('resumoSelecionados').textContent = `${qtd} animal${qtd === 1 ? '' : 'is'} selecionado${qtd === 1 ? '' : 's'}`;
+  document.getElementById('pesoTotalSelecionados').textContent = `${pesoTotal.toLocaleString('pt-BR')} kg` +
+    (qtdComValor > 0 ? ` — valor já fixado em ${qtdComValor} animal(is): R$ ${valorFixado.toLocaleString('pt-BR')}` : '');
+}
+
+// ---------- Importação de planilha (Brinco + Peso de saída) ----------
+function normalizarTexto(s) {
+  return String(s ?? '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function normalizarCabecalho(s) {
+  return normalizarTexto(s).replace(/[^a-z0-9]/g, '');
+}
+
+function excelDateParaISO(valor) {
+  if (valor === '' || valor === null || valor === undefined) return null;
+  if (valor instanceof Date) {
+    const ano = valor.getUTCFullYear();
+    const mes = String(valor.getUTCMonth() + 1).padStart(2, '0');
+    const dia = String(valor.getUTCDate()).padStart(2, '0');
+    return `${ano}-${mes}-${dia}`;
+  }
+  if (typeof valor === 'number') {
+    const d = XLSX.SSF.parse_date_code(valor);
+    if (!d) return null;
+    return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
+  }
+  const texto = String(valor).trim();
+  let m = texto.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  m = texto.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  return null;
+}
+
+function lerArquivoComoLinhas(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const matriz = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true });
+        if (matriz.length === 0) { resolve([]); return; }
+
+        const mapaColunas = {};
+        matriz[0].forEach((cabecalho, idx) => { mapaColunas[normalizarCabecalho(cabecalho)] = idx; });
+
+        const linhas = [];
+        for (let i = 1; i < matriz.length; i++) {
+          const linhaBruta = matriz[i];
+          const vazia = linhaBruta.every(v => v === '' || v === null || v === undefined);
+          if (vazia) continue;
+          const obj = { __linha: i + 1 };
+          Object.entries(mapaColunas).forEach(([chave, idx]) => { obj[chave] = linhaBruta[idx]; });
+          linhas.push(obj);
+        }
+        resolve(linhas);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = () => reject(new Error('Não foi possível ler o arquivo.'));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function processarPlanilhaVenda() {
+  try {
+    const file = document.getElementById('arquivoVenda').files[0];
+    if (!file) { showMsg('msgImportVenda', 'Selecione um arquivo .xlsx primeiro.', 'error'); return; }
+
+    let linhas;
+    try {
+      linhas = await lerArquivoComoLinhas(file);
+    } catch (err) {
+      showMsg('msgImportVenda', 'Erro ao ler o arquivo: ' + err.message, 'error');
+      return;
+    }
+
+    if (linhas.length === 0) {
+      showMsg('msgImportVenda', 'A planilha não tem linhas de dados.', 'error');
+      return;
+    }
+
+    const brincosPlanilha = linhas.map(l => String(l.brinco || '').trim()).filter(Boolean);
+    if (brincosPlanilha.length === 0) {
+      showMsg('msgImportVenda', 'Nenhum brinco válido encontrado na planilha.', 'error');
+      return;
+    }
+
+    const { data: encontrados, error } = await supabaseClient
+      .from('vw_animais_resumo')
+      .select('id, brinco, status, peso_atual')
+      .in('brinco', brincosPlanilha);
+
+    if (error) {
+      showMsg('msgImportVenda', 'Erro ao consultar animais: ' + error.message, 'error');
+      return;
+    }
+
+    const mapaEncontrados = new Map((encontrados || []).map(a => [normalizarTexto(a.brinco), a]));
+    let adicionados = 0;
+    const semSucesso = [];
+
+    linhas.forEach(linha => {
+      const brinco = String(linha.brinco || '').trim();
+      if (!brinco) return;
+
+      const animal = mapaEncontrados.get(normalizarTexto(brinco));
+      if (!animal) { semSucesso.push(`${brinco} (não encontrado)`); return; }
+      if (animal.status !== 'ativo') { semSucesso.push(`${brinco} (não está ativo)`); return; }
+
+      const pesoSaida = parseFloat(String(linha.pesodesaida ?? '').replace(',', '.')) || Number(animal.peso_atual) || 0;
+      const valorTexto = String(linha.valorvendido ?? '').trim();
+      const valorVendido = valorTexto ? (parseFloat(valorTexto.replace(',', '.')) || null) : null;
+      const compradorLinha = String(linha.comprador ?? '').trim() || null;
+      const dataVendaLinha = excelDateParaISO(linha.datadavenda ?? linha.dataventa ?? '');
+      const observacoesLinha = String(linha.observacoes ?? '').trim() || null;
+      animaisSelecionados.set(animal.id, {
+        brinco: animal.brinco, pesoSaida, valorVendido,
+        comprador: compradorLinha, dataVenda: dataVendaLinha, observacoes: observacoesLinha,
+      });
+      adicionados++;
+    });
+
+    if (adicionados === 0 && semSucesso.length === 0) {
+      showMsg('msgImportVenda', 'Nenhuma linha válida encontrada na planilha.', 'error');
+      return;
+    }
+
+    // Limpa os filtros pra trazer todos os animais ativos à vista, com os importados já marcados
+    document.getElementById('v_filtro_fazenda').value = '';
+    document.getElementById('v_filtro_lote').innerHTML = '<option value="">Todos</option>';
+    document.getElementById('v_filtro_brinco').value = '';
+    await carregarAnimaisDisponiveis();
+
+    const aviso = adicionados > 0 ? ' Agora preencha os dados da venda abaixo e clique em "Cadastrar venda" pra confirmar.' : '';
+    const resumo = semSucesso.length > 0
+      ? `${adicionados} animal(is) adicionado(s) à seleção. ${semSucesso.length} linha(s) com problema: ${semSucesso.join(', ')}.${aviso}`
+      : `${adicionados} animal(is) adicionado(s) à seleção com sucesso!${aviso}`;
+    showMsg('msgImportVenda', resumo, semSucesso.length > 0 ? 'error' : 'success');
+
+    document.getElementById('arquivoVenda').value = '';
+  } catch (erroInesperado) {
+    showMsg('msgImportVenda', 'Erro inesperado ao importar: ' + erroInesperado.message, 'error');
+  }
+}
+
+// ---------- Geração de parcelas (preview editável) ----------
+function gerarParcelas() {
+  const valorTotal = parseFloat(document.getElementById('v_valor_total').value) || 0;
+  const qtd = parseInt(document.getElementById('v_qtd_parcelas').value) || 1;
+  const primeiroVenc = document.getElementById('v_primeiro_vencimento').value;
+  const intervalo = parseInt(document.getElementById('v_intervalo_dias').value) || 30;
+
+  if (!valorTotal) { alert('Informe o valor total da venda antes de gerar as parcelas.'); return; }
+  if (!primeiroVenc) { alert('Informe a data do primeiro vencimento.'); return; }
+
+  const valorParcela = Math.round((valorTotal / qtd) * 100) / 100;
+  parcelasState = [];
+  const base = new Date(primeiroVenc + 'T00:00:00');
+
+  for (let i = 0; i < qtd; i++) {
+    const venc = new Date(base);
+    venc.setDate(venc.getDate() + intervalo * i);
+    parcelasState.push({
+      numero: i + 1,
+      valor: i === qtd - 1 ? Math.round((valorTotal - valorParcela * (qtd - 1)) * 100) / 100 : valorParcela,
+      vencimento: venc.toISOString().slice(0, 10),
+    });
+  }
+  renderPreviaParcelas();
+}
+
+function atualizarPreviaParcelas() {
+  if (parcelasState.length > 0) gerarParcelas();
+}
+
+function renderPreviaParcelas() {
+  document.getElementById('previaParcelas').innerHTML = `
+    <table class="mini-table">
+      <thead><tr><th>#</th><th>Valor (R$)</th><th>Vencimento</th></tr></thead>
+      <tbody>
+        ${parcelasState.map((p, i) => `
+          <tr>
+            <td>${p.numero}</td>
+            <td><input type="number" step="0.01" value="${p.valor}" style="width:100px" onchange="parcelasState[${i}].valor = parseFloat(this.value) || 0"></td>
+            <td><input type="date" value="${p.vencimento}" onchange="parcelasState[${i}].vencimento = this.value"></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+// ---------- Lista ----------
+async function carregarVendas() {
+  const { data: vendas, error } = await supabaseClient
+    .from('vw_vendas_resumo')
+    .select('*')
+    .order('data_venda', { ascending: false });
+
+  if (error) {
+    document.getElementById('tabelaVendas').innerHTML = `<tr class="empty-row"><td colspan="10">Erro ao carregar: ${error.message}</td></tr>`;
+    return;
+  }
+
+  vendasCache = vendas || [];
+  carregarFiltroMesesVenda();
+  carregarFiltroDatasVenda(document.getElementById('filtroMesVenda').value);
+  aplicarFiltrosVendas();
+}
+
+function carregarFiltroMesesVenda() {
+  const sel = document.getElementById('filtroMesVenda');
+  const valorAtual = sel.value;
+
+  const chaves = new Set();
+  vendasCache.forEach(v => { if (v.data_venda) chaves.add(v.data_venda.slice(0, 7)); });
+
+  const ordenadas = [...chaves].sort().reverse();
+  sel.innerHTML = `<option value="">Todos os meses</option>` +
+    ordenadas.map(c => `<option value="${c}">${mesLabel(c)}</option>`).join('');
+
+  if (valorAtual) sel.value = valorAtual;
+}
+
+function carregarFiltroDatasVenda(mesSelecionado) {
+  const sel = document.getElementById('filtroDataVenda');
+
+  const datas = new Set();
+  vendasCache.forEach(v => {
+    if (v.data_venda && (!mesSelecionado || v.data_venda.slice(0, 7) === mesSelecionado)) {
+      datas.add(v.data_venda);
+    }
+  });
+
+  const ordenadas = [...datas].sort().reverse();
+  sel.innerHTML = `<option value="">Todas as datas</option>` +
+    ordenadas.map(d => `<option value="${d}">${new Date(d + 'T00:00:00').toLocaleDateString('pt-BR')}</option>`).join('');
+}
+
+function aplicarFiltrosVendas() {
+  const mes = document.getElementById('filtroMesVenda').value;
+  const data = document.getElementById('filtroDataVenda').value;
+
+  const lista = vendasCache.filter(v => {
+    if (mes && (!v.data_venda || v.data_venda.slice(0, 7) !== mes)) return false;
+    if (data && v.data_venda !== data) return false;
+    return true;
+  });
+
+  renderTabelaVendas(lista);
+}
+
+function renderTabelaVendas(vendas) {
+  document.getElementById('totalVendas').textContent = `${vendas.length} venda${vendas.length === 1 ? '' : 's'} registrada${vendas.length === 1 ? '' : 's'}`;
+
+  if (vendas.length === 0) {
+    document.getElementById('tabelaVendas').innerHTML = '<tr class="empty-row"><td colspan="10">Nenhuma venda encontrada com esse filtro.</td></tr>';
+    return;
+  }
+
+  document.getElementById('tabelaVendas').innerHTML = vendas.map(v => {
+    let situacao = '<span class="badge bg-info">À vista</span>';
+    if (v.forma_recebimento === 'Parcelado') {
+      if (v.parcelas_total === 0) situacao = '<span class="badge bg-warning">Sem parcelas geradas</span>';
+      else if (v.parcelas_recebidas >= v.parcelas_total) situacao = '<span class="badge bg-success">Recebido</span>';
+      else if (v.parcelas_recebidas > 0) situacao = '<span class="badge bg-warning">Parcial</span>';
+      else situacao = '<span class="badge bg-danger">A receber</span>';
+    }
+
+    const lucroCor = v.lucro_bruto >= 0 ? 'var(--success)' : 'var(--danger)';
+    const pesoMedio = v.qtd_animais > 0 ? Number(v.peso_total_saida || 0) / v.qtd_animais : 0;
+    const valorPorArroba = v.peso_total_saida > 0 ? Number(v.valor_total || 0) / (Number(v.peso_total_saida) / ARROBA_KG) : null;
+
+    const acaoParcelas = v.forma_recebimento === 'Parcelado' ? `
+      <button class="btn btn-secondary" style="padding:4px 10px" title="Gerenciar parcelas" onclick="abrirModalParcelas('${v.id}','${(v.comprador || 'venda').replace(/'/g, "\\'")}')"><i class="ti ti-calendar-stats"></i></button>
+    ` : '';
+
+    return `
+      <tr>
+        <td>${new Date(v.data_venda + 'T00:00:00').toLocaleDateString('pt-BR')}</td>
+        <td><b style="color:var(--text)">${v.comprador || '—'}</b></td>
+        <td>${v.valor_total !== null ? 'R$ ' + Number(v.valor_total).toLocaleString('pt-BR') : '—'}</td>
+        <td>${v.qtd_animais || 0}</td>
+        <td>${pesoMedio.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} kg</td>
+        <td>${valorPorArroba !== null ? 'R$ ' + valorPorArroba.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) : '—'}</td>
+        <td style="color:${lucroCor}">R$ ${Number(v.lucro_bruto || 0).toLocaleString('pt-BR')}</td>
+        <td>${v.forma_recebimento || '—'}</td>
+        <td>${situacao}</td>
+        <td style="white-space:nowrap">
+          ${acaoParcelas}
+          <button class="btn btn-secondary" style="padding:4px 10px" title="Editar" onclick="editarVenda('${v.id}')"><i class="ti ti-pencil"></i></button>
+          <button class="btn btn-danger" style="padding:4px 10px" title="Excluir" onclick="excluirVenda('${v.id}','${(v.comprador || 'venda').replace(/'/g, "\\'")}')"><i class="ti ti-trash"></i></button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// ---------- Exportação da lista de vendas ----------
+function listaVendasFiltradaAtual() {
+  const mes = document.getElementById('filtroMesVenda').value;
+  const data = document.getElementById('filtroDataVenda').value;
+  return vendasCache.filter(v => {
+    if (mes && (!v.data_venda || v.data_venda.slice(0, 7) !== mes)) return false;
+    if (data && v.data_venda !== data) return false;
+    return true;
+  });
+}
+
+function exportarVendasExcel() {
+  const lista = listaVendasFiltradaAtual();
+  if (lista.length === 0) { alert('Não há vendas para exportar com esse filtro.'); return; }
+
+  const linhas = lista.map(v => ({
+    'Data': new Date(v.data_venda + 'T00:00:00').toLocaleDateString('pt-BR'),
+    'Comprador': v.comprador || '',
+    'Valor Total': v.valor_total ?? '',
+    'Animais': v.qtd_animais || 0,
+    'Peso Médio (kg)': v.qtd_animais > 0 ? Number((Number(v.peso_total_saida || 0) / v.qtd_animais).toFixed(1)) : 0,
+    'Valor por @': v.peso_total_saida > 0 ? Number((Number(v.valor_total || 0) / (Number(v.peso_total_saida) / ARROBA_KG)).toFixed(2)) : '',
+    'Lucro Bruto': v.lucro_bruto ?? 0,
+    'Forma de Recebimento': v.forma_recebimento || '',
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(linhas);
+  ws['!cols'] = [{wch:12},{wch:20},{wch:13},{wch:9},{wch:14},{wch:12},{wch:13},{wch:16}];
+  Object.keys(ws).forEach(ref => {
+    if (ref[0] === '!') return;
+    if (!ws[ref].s) ws[ref].s = {};
+    ws[ref].s.alignment = { horizontal: 'center' };
+  });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Vendas');
+  XLSX.writeFile(wb, `vendas-${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+function exportarVendasPdf() {
+  const lista = listaVendasFiltradaAtual();
+  if (lista.length === 0) { alert('Não há vendas para exportar com esse filtro.'); return; }
+
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    alert('Não foi possível carregar a biblioteca de PDF (verifique sua conexão com a internet) e tente novamente.');
+    return;
+  }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt' });
+
+  if (typeof doc.autoTable !== 'function') {
+    alert('A biblioteca de tabelas do PDF não carregou corretamente. Recarregue a página e tente novamente.');
+    return;
+  }
+
+  const selMes = document.getElementById('filtroMesVenda');
+  const selData = document.getElementById('filtroDataVenda');
+  const periodo = selData.value
+    ? new Date(selData.value + 'T00:00:00').toLocaleDateString('pt-BR')
+    : (selMes.value ? mesLabel(selMes.value).toUpperCase() : new Date().toLocaleDateString('pt-BR'));
+  const titulo = `RELATÓRIO DE VENDAS - ${periodo}`;
+
+  doc.setFontSize(13);
+  if (logoBase64) {
+    try { doc.addImage(logoBase64, 'PNG', 40, 12, 26, 26); } catch (e) { /* segue sem a logo se der erro */ }
+    doc.text(titulo, 75, 30);
+  } else {
+    doc.text(titulo, 40, 30);
+  }
+
+  const linhas = lista.map(v => {
+    const pesoMedio = v.qtd_animais > 0 ? Number(v.peso_total_saida || 0) / v.qtd_animais : 0;
+    const valorPorArroba = v.peso_total_saida > 0 ? Number(v.valor_total || 0) / (Number(v.peso_total_saida) / ARROBA_KG) : null;
+    return [
+      new Date(v.data_venda + 'T00:00:00').toLocaleDateString('pt-BR'),
+      v.comprador || '—',
+      v.valor_total !== null ? Number(v.valor_total).toLocaleString('pt-BR') : '—',
+      v.qtd_animais || 0,
+      pesoMedio.toLocaleString('pt-BR', { maximumFractionDigits: 1 }),
+      valorPorArroba !== null ? valorPorArroba.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) : '—',
+      Number(v.lucro_bruto || 0).toLocaleString('pt-BR'),
+      v.forma_recebimento || '—',
+    ];
+  });
+
+  const valorTotalGeral = lista.reduce((s, v) => s + (Number(v.valor_total) || 0), 0);
+  const lucroTotalGeral = lista.reduce((s, v) => s + (Number(v.lucro_bruto) || 0), 0);
+
+  doc.autoTable({
+    startY: 45,
+    head: [['Data', 'Comprador', 'Valor Total', 'Animais', 'Peso Médio', 'Valor por @', 'Lucro Bruto', 'Recebimento']],
+    body: linhas,
+    foot: [['', '', valorTotalGeral.toLocaleString('pt-BR'), '', '', '', lucroTotalGeral.toLocaleString('pt-BR'), 'TOTAIS']],
+    theme: 'grid',
+    styles: { fontSize: 8, halign: 'center', lineWidth: 0.3, lineColor: [0, 0, 0] },
+    headStyles: { fillColor: [26, 74, 138], halign: 'center', lineWidth: 0.3, lineColor: [0, 0, 0] },
+    footStyles: { fillColor: [240, 240, 240], textColor: [20, 20, 20], fontStyle: 'bold', halign: 'center', lineWidth: 0.3, lineColor: [0, 0, 0] },
+  });
+
+  doc.save(`vendas-${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
+// ---------- CRUD venda ----------
+async function editarVenda(id) {
+  const { data: v, error } = await supabaseClient.from('vendas').select('*').eq('id', id).single();
+  if (error) { alert('Erro ao carregar venda: ' + error.message); return; }
+
+  vendaEditandoId = id;
+  mostrarAba('cadastro');
+
+  document.getElementById('v_data_venda').value = v.data_venda || '';
+  document.getElementById('v_comprador').value = v.comprador || '';
+  document.getElementById('v_valor_total').value = v.valor_total || '';
+  document.getElementById('v_frete_total').value = v.frete_total || '';
+  document.getElementById('v_forma_recebimento').value = v.forma_recebimento || '';
+  document.getElementById('v_observacoes').value = v.observacoes || '';
+  document.getElementById('cardAnimaisVendidos').style.display = 'none';
+  document.getElementById('cardParcelamento').style.display = 'none'; // parcelas de venda existente: gerenciar pelo modal na lista
+  document.getElementById('btnSalvarVenda').textContent = 'Salvar alterações';
+}
+
+async function excluirVenda(id, comprador) {
+  const { data: vinculados } = await supabaseClient.from('animais').select('id').eq('venda_id', id);
+  if (vinculados && vinculados.length > 0) {
+    alert(`Não é possível excluir: existem ${vinculados.length} animal(is) vinculado(s) a essa venda. Remova o vínculo nos animais primeiro.`);
+    return;
+  }
+
+  if (!confirm(`Excluir a venda para "${comprador}"? Isso também remove as parcelas vinculadas.`)) return;
+
+  const { error } = await supabaseClient.from('vendas').delete().eq('id', id);
+  if (error) {
+    alert('Não foi possível excluir: ' + error.message);
+    return;
+  }
+  carregarVendas();
+}
+
+async function salvarVenda() {
+  const dataVenda = document.getElementById('v_data_venda').value;
+  const valorTotal = document.getElementById('v_valor_total').value;
+  const formaRecebimento = document.getElementById('v_forma_recebimento').value;
+
+  if (!dataVenda) { showMsg('msgCadastro', 'A data da venda é obrigatória.', 'error'); return; }
+  if (!valorTotal) { showMsg('msgCadastro', 'O valor total é obrigatório.', 'error'); return; }
+  if (!formaRecebimento) { showMsg('msgCadastro', 'Selecione a forma de recebimento.', 'error'); return; }
+  if (formaRecebimento === 'Parcelado' && !vendaEditandoId && parcelasState.length === 0) {
+    showMsg('msgCadastro', 'Clique em "Gerar / atualizar parcelas" antes de salvar.', 'error');
+    return;
+  }
+  if (!vendaEditandoId && animaisSelecionados.size === 0) {
+    showMsg('msgCadastro', 'Selecione pelo menos um animal vendido.', 'error');
+    return;
+  }
+
+  const payload = {
+    data_venda: dataVenda,
+    comprador: document.getElementById('v_comprador').value.trim() || null,
+    valor_total: Number(valorTotal),
+    frete_total: document.getElementById('v_frete_total').value ? Number(document.getElementById('v_frete_total').value) : 0,
+    forma_recebimento: formaRecebimento,
+    observacoes: document.getElementById('v_observacoes').value.trim() || null,
+  };
+
+  const btn = document.getElementById('btnSalvarVenda');
+  btn.disabled = true;
+
+  if (vendaEditandoId) {
+    const { error } = await supabaseClient.from('vendas').update(payload).eq('id', vendaEditandoId);
+    btn.disabled = false;
+    if (error) { showMsg('msgCadastro', 'Erro ao salvar: ' + error.message, 'error'); return; }
+    showMsg('msgCadastro', 'Venda atualizada com sucesso!', 'success');
+  } else {
+    const { data: nova, error } = await supabaseClient.from('vendas').insert(payload).select('id').single();
+    if (error) {
+      btn.disabled = false;
+      showMsg('msgCadastro', 'Erro ao salvar: ' + error.message, 'error');
+      return;
+    }
+
+    if (formaRecebimento === 'Parcelado' && parcelasState.length > 0) {
+      const parcelasPayload = parcelasState.map(p => ({
+        venda_id: nova.id,
+        numero_parcela: p.numero,
+        valor: p.valor,
+        vencimento: p.vencimento,
+      }));
+      const { error: errorParcelas } = await supabaseClient.from('vendas_parcelas').insert(parcelasPayload);
+      if (errorParcelas) {
+        btn.disabled = false;
+        showMsg('msgCadastro', 'Venda criada, mas houve erro ao gerar as parcelas: ' + errorParcelas.message, 'error');
+        return;
+      }
+    }
+
+    // Atualiza os animais selecionados: marca como vendido, registra peso de saída.
+    // Quem tem valor explícito (digitado ou importado) usa esse valor; o restante do
+    // valor_total é distribuído proporcionalmente ao peso entre os animais sem valor definido.
+    const entradas = [...animaisSelecionados.entries()];
+    const comValorExplicito = entradas.filter(([, info]) => info.valorVendido !== null && info.valorVendido !== undefined);
+    const semValorExplicito = entradas.filter(([, info]) => info.valorVendido === null || info.valorVendido === undefined);
+
+    const somaExplicita = comValorExplicito.reduce((s, [, info]) => s + Number(info.valorVendido), 0);
+    const valorRestante = Number(valorTotal) - somaExplicita;
+    const pesoRestante = semValorExplicito.reduce((s, [, info]) => s + (Number(info.pesoSaida) || 0), 0);
+
+    let falhas = 0;
+
+    const atualizacoes = entradas.map(([animalId, info]) => {
+      const pesoSaida = Number(info.pesoSaida) || 0;
+      let precoVenda;
+      if (info.valorVendido !== null && info.valorVendido !== undefined) {
+        precoVenda = Number(info.valorVendido);
+      } else {
+        precoVenda = pesoRestante > 0
+          ? Math.round((valorRestante * (pesoSaida / pesoRestante)) * 100) / 100
+          : null;
+      }
+      return supabaseClient.from('animais').update({
+        status: 'vendido',
+        data_venda: info.dataVenda || dataVenda,
+        peso_saida: pesoSaida,
+        preco_venda: precoVenda,
+        comprador: info.comprador || payload.comprador,
+        observacoes: info.observacoes || undefined,
+        venda_id: nova.id,
+      }).eq('id', animalId);
+    });
+
+    const resultados = await Promise.all(atualizacoes);
+    resultados.forEach(r => { if (r.error) falhas++; });
+
+    btn.disabled = false;
+
+    if (falhas > 0) {
+      showMsg('msgCadastro', `Venda cadastrada, mas ${falhas} animal(is) não puderam ser atualizados. Verifique manualmente em Animais.`, 'error');
+      limparFormulario();
+      mostrarAba('lista');
+      return;
+    }
+
+    showMsg('msgCadastro', 'Venda cadastrada com sucesso!', 'success');
+  }
+
+  limparFormulario();
+  mostrarAba('lista');
+}
+
+document.getElementById('btnSalvarVenda').addEventListener('click', salvarVenda);
+
+// ---------- Modal: gestão de parcelas a receber ----------
+async function abrirModalParcelas(vendaId, comprador) {
+  vendaAtualParcelasId = vendaId;
+  document.getElementById('modalParcelasTitulo').textContent = `Parcelas — ${comprador}`;
+  document.getElementById('np_numero').value = '';
+  document.getElementById('np_valor').value = '';
+  document.getElementById('np_vencimento').value = '';
+  document.getElementById('msgParcelas').className = 'msg';
+  document.getElementById('modalParcelas').style.display = 'flex';
+  await carregarParcelasModal();
+}
+
+async function carregarParcelasModal() {
+  const { data: parcelas, error } = await supabaseClient
+    .from('vendas_parcelas')
+    .select('*')
+    .eq('venda_id', vendaAtualParcelasId)
+    .order('numero_parcela');
+
+  if (error) {
+    document.getElementById('tabelaParcelas').innerHTML = `<tr class="empty-row"><td colspan="5">Erro: ${error.message}</td></tr>`;
+    return;
+  }
+
+  document.getElementById('np_numero').value = parcelas.length + 1;
+
+  if (parcelas.length === 0) {
+    document.getElementById('tabelaParcelas').innerHTML = '<tr class="empty-row"><td colspan="5">Nenhuma parcela cadastrada.</td></tr>';
+    return;
+  }
+
+  document.getElementById('tabelaParcelas').innerHTML = parcelas.map(p => `
+    <tr>
+      <td>${p.numero_parcela}</td>
+      <td>R$ ${Number(p.valor).toLocaleString('pt-BR')}</td>
+      <td>${new Date(p.vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}</td>
+      <td>${p.recebido
+        ? `<span class="badge bg-success">Recebido${p.data_recebimento ? ' em ' + new Date(p.data_recebimento + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</span>`
+        : '<span class="badge bg-danger">A receber</span>'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-secondary" style="padding:4px 10px" onclick="toggleRecebimentoParcela('${p.id}', ${p.recebido})">
+          <i class="ti ${p.recebido ? 'ti-rotate-2' : 'ti-check'}"></i>
+        </button>
+        <button class="btn btn-danger" style="padding:4px 10px" onclick="excluirParcela('${p.id}')"><i class="ti ti-trash"></i></button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function toggleRecebimentoParcela(parcelaId, recebidoAtual) {
+  const { error } = await supabaseClient.from('vendas_parcelas').update({
+    recebido: !recebidoAtual,
+    data_recebimento: !recebidoAtual ? new Date().toISOString().slice(0, 10) : null,
+  }).eq('id', parcelaId);
+
+  if (error) { showMsg('msgParcelas', 'Erro: ' + error.message, 'error'); return; }
+  carregarParcelasModal();
+  carregarVendas();
+}
+
+async function excluirParcela(parcelaId) {
+  if (!confirm('Excluir essa parcela?')) return;
+  const { error } = await supabaseClient.from('vendas_parcelas').delete().eq('id', parcelaId);
+  if (error) { showMsg('msgParcelas', 'Erro: ' + error.message, 'error'); return; }
+  carregarParcelasModal();
+  carregarVendas();
+}
+
+async function adicionarParcelaManual() {
+  const numero = document.getElementById('np_numero').value;
+  const valor = document.getElementById('np_valor').value;
+  const vencimento = document.getElementById('np_vencimento').value;
+
+  if (!numero || !valor || !vencimento) {
+    showMsg('msgParcelas', 'Preencha número, valor e vencimento.', 'error');
+    return;
+  }
+
+  const { error } = await supabaseClient.from('vendas_parcelas').insert({
+    venda_id: vendaAtualParcelasId,
+    numero_parcela: Number(numero),
+    valor: Number(valor),
+    vencimento,
+  });
+
+  if (error) { showMsg('msgParcelas', 'Erro: ' + error.message, 'error'); return; }
+
+  document.getElementById('np_valor').value = '';
+  document.getElementById('np_vencimento').value = '';
+  carregarParcelasModal();
+  carregarVendas();
+}
+
+// ---------- Modal genérico ----------
+function fecharModal(modalId) {
+  document.getElementById(modalId).style.display = 'none';
+}
+
+(async function init() {
+  await checkAuth();
+  showUserEmail();
+  document.getElementById('v_data_venda').value = new Date().toISOString().slice(0, 10);
+  carregarVendas();
+  logoBase64 = await carregarLogoBase64();
+})();
+</script>
+
+</body>
+</html>

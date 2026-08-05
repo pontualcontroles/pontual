@@ -1,0 +1,1268 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agropecuária Pontual — Animais</title>
+<link rel="icon" href="logo-pontual.png" type="image/png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+
+<script src="supabase-config.js"></script>
+<script src="layout.js"></script>
+<script>
+renderTopbarSidebar('animais');
+
+document.getElementById('mainContent').innerHTML = `
+  <div class="pagehead">
+    <div>
+      <div class="pagetitle">Animais</div>
+      <div class="pagesub" id="totalAnimais">Carregando...</div>
+    </div>
+  </div>
+
+  <div class="subtoggle">
+    <button class="stbtn active" id="btnTabLista" onclick="mostrarAba('lista')">Lista de animais</button>
+    <button class="stbtn" id="btnTabCadastro" onclick="mostrarAba('cadastro')">Cadastrar animal</button>
+    <button class="stbtn" id="btnTabImportar" onclick="mostrarAba('importar')">Importar planilha</button>
+  </div>
+
+  <div id="abaLista">
+    <div class="toolbar">
+      <select id="filtroFazenda" onchange="aplicarFiltros()"><option value="">Todas as fazendas</option></select>
+      <select id="filtroStatus" onchange="aplicarFiltros()">
+        <option value="">Todos os status</option>
+        <option value="ativo">Ativo</option>
+        <option value="vendido">Vendido</option>
+        <option value="morto">Morto</option>
+      </select>
+      <input id="filtroBusca" placeholder="Buscar por brinco..." oninput="aplicarFiltros()" style="background:var(--bg-input);border:0.5px solid var(--border);border-radius:7px;padding:7px 11px;color:var(--text);font-size:12px;min-width:160px">
+    </div>
+    <div id="msgLista" class="msg"></div>
+    <div class="card">
+      <div class="cardb table-wrap">
+        <table>
+          <thead>
+            <tr><th>Brinco</th><th>Fazenda</th><th>Lote / Manga</th><th>Sexo / Categoria</th><th>Peso atual</th><th>GMD</th><th>Dias no ciclo</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody id="tabelaAnimais">
+            <tr class="empty-row"><td colspan="9"><span class="spinner"></span> Carregando...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="abaCadastro" style="display:none">
+    <div id="msgCadastro" class="msg"></div>
+
+    <div class="card">
+      <div class="cardh">Identificação</div>
+      <div class="cardb">
+        <div class="frow cols-3">
+          <div class="fgroup"><label>Brinco *</label><input id="a_brinco" placeholder="0001"></div>
+          <div class="fgroup">
+            <label>Sexo *</label>
+            <select id="a_sexo">
+              <option value="">Selecione...</option>
+              <option value="Macho">Macho</option>
+              <option value="Fêmea">Fêmea</option>
+            </select>
+          </div>
+          <div class="fgroup">
+            <label>Categoria</label>
+            <select id="a_categoria">
+              <option value="">Selecione...</option>
+              <option>Bezerro</option>
+              <option>Bezerra</option>
+              <option>Garrote</option>
+              <option>Novilho</option>
+              <option>Novilha</option>
+              <option>Boi</option>
+              <option>Vaca</option>
+              <option>Touro</option>
+              <option>Matrona</option>
+              <option>Vaca seca</option>
+            </select>
+          </div>
+        </div>
+        <div class="frow cols-3">
+          <div class="fgroup"><label>Raça</label><input id="a_raca" placeholder="Nelore"></div>
+          <div class="fgroup"><label>Pelagem</label><input id="a_pelagem" placeholder="Branco"></div>
+          <div class="fgroup"><label>Marca / Sinal</label><input id="a_marca" placeholder="Ex: marca de fogo"></div>
+        </div>
+        <label class="fcheck"><input type="checkbox" id="a_castrado"> Animal castrado</label>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardh">Localização</div>
+      <div class="cardb">
+        <div class="frow cols-3">
+          <div class="fgroup">
+            <label>Fazenda *</label>
+            <select id="a_fazenda_id" onchange="carregarLotesEMangas(this.value)"><option value="">Carregando fazendas...</option></select>
+          </div>
+          <div class="fgroup">
+            <label>Lote</label>
+            <select id="a_lote_id"><option value="">Selecione a fazenda primeiro</option></select>
+          </div>
+          <div class="fgroup">
+            <label>Manga</label>
+            <select id="a_manga_id"><option value="">Selecione a fazenda primeiro</option></select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardh">Origem e datas</div>
+      <div class="cardb">
+        <div class="frow cols-3">
+          <div class="fgroup"><label>Data de nascimento</label><input id="a_data_nascimento" type="date" onchange="recalcularIdade()"></div>
+          <div class="fgroup"><label>Data de desmame</label><input id="a_data_desmame" type="date"></div>
+          <div class="fgroup"><label>Data de entrada *</label><input id="a_data_entrada" type="date" onchange="recalcularIdade()"></div>
+        </div>
+        <div class="frow cols-3">
+          <div class="fgroup"><label>Idade na entrada (meses) — calculado</label><input id="a_idade_meses" type="text" readonly style="opacity:0.7"></div>
+          <div class="fgroup"></div>
+          <div class="fgroup"></div>
+        </div>
+        <div class="frow">
+          <div class="fgroup"><label>Produtor de origem</label><input id="a_produtor_origem" placeholder="Nome do produtor / fazenda de origem"></div>
+          <div class="fgroup">
+            <label>Compra de origem</label>
+            <select id="a_compra_id" onchange="carregarInfoComissaoCompra(this.value)"><option value="">Sem vínculo / compra individual</option></select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardh">Compra e custos</div>
+      <div class="cardb">
+        <div class="frow cols-3">
+          <div class="fgroup"><label>Peso de entrada (kg) *</label><input id="a_peso_entrada" type="number" step="0.01" placeholder="220" oninput="recalcularCustoTotal(); recalcularIdade()"></div>
+          <div class="fgroup"><label>Preço de compra (R$/kg)</label><input id="a_preco_compra_kg" type="number" step="0.01" placeholder="14.50" oninput="recalcularCustoTotal()"></div>
+          <div class="fgroup"><label>Frete (R$)</label><input id="a_frete_compra" type="number" step="0.01" placeholder="0" oninput="recalcularCustoTotal()"></div>
+        </div>
+        <div class="frow cols-3">
+          <div class="fgroup"><label>Custo total (R$) — calculado pelo sistema</label><input id="a_custo_total" type="number" step="0.01" placeholder="Calculado automaticamente" readonly style="opacity:0.7"></div>
+          <div class="fgroup"><label>Custo por kg (R$) — com rateio de comissão</label><input id="a_custo_por_kg" type="text" readonly style="opacity:0.7"></div>
+          <div class="fgroup"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardh">Observações</div>
+      <div class="cardb">
+        <div class="frow cols-1">
+          <div class="fgroup"><textarea id="a_observacoes" placeholder="Observações gerais sobre o animal..."></textarea></div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" id="btnSalvarAnimal">Cadastrar animal</button>
+          <button class="btn btn-secondary" onclick="limparFormulario()">Limpar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="abaImportar" style="display:none">
+    <div class="subtoggle">
+      <button class="stbtn active" id="btnSubImportarAnimais" onclick="mostrarSubImportar('animais')">Cadastro de animais</button>
+      <button class="stbtn" id="btnSubImportarPesagens" onclick="mostrarSubImportar('pesagens')">Pesagens</button>
+    </div>
+
+    <div id="subImportarAnimais">
+      <div class="card">
+        <div class="cardh">1. Baixe o modelo e preencha</div>
+        <div class="cardb">
+          <p style="font-size:13px;color:var(--text-table);margin-bottom:10px">
+            Use sempre o nome de Fazenda/Lote/Manga exatamente como estão cadastrados no sistema.
+            Pra vincular o lote a uma compra, preencha a coluna "Compra" com o código dela (ex.: 7), veja o código na aba Compras.
+            A planilha tem uma aba de instruções detalhadas.
+          </p>
+          <a class="btn btn-secondary" href="modelo-cadastro-animais.xlsx" download><i class="ti ti-download"></i> Baixar modelo de cadastro</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="cardh">2. Suba a planilha preenchida</div>
+        <div class="cardb">
+          <input type="file" id="arquivoAnimais" accept=".xlsx,.xls" style="margin-bottom:10px">
+          <div>
+            <button class="btn btn-primary" id="btnProcessarAnimais" onclick="processarPlanilhaAnimais()">Processar planilha</button>
+          </div>
+          <div id="msgImportAnimais" class="msg"></div>
+        </div>
+      </div>
+
+      <div class="card" id="cardResultadoAnimais" style="display:none">
+        <div class="cardh">Resultado da importação</div>
+        <div class="cardb table-wrap">
+          <table>
+            <thead><tr><th>Linha</th><th>Brinco</th><th>Status</th></tr></thead>
+            <tbody id="tabelaResultadoAnimais"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="subImportarPesagens" style="display:none">
+      <div class="card">
+        <div class="cardh">1. Baixe o modelo e preencha</div>
+        <div class="cardb">
+          <p style="font-size:13px;color:var(--text-table);margin-bottom:10px">
+            O brinco precisa ser exatamente igual ao já cadastrado no sistema. O GMD é recalculado automaticamente.
+          </p>
+          <a class="btn btn-secondary" href="modelo-pesagens.xlsx" download><i class="ti ti-download"></i> Baixar modelo de pesagens</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="cardh">2. Suba a planilha preenchida</div>
+        <div class="cardb">
+          <input type="file" id="arquivoPesagens" accept=".xlsx,.xls" style="margin-bottom:10px">
+          <div>
+            <button class="btn btn-primary" id="btnProcessarPesagens" onclick="processarPlanilhaPesagens()">Processar planilha</button>
+          </div>
+          <div id="msgImportPesagens" class="msg"></div>
+        </div>
+      </div>
+
+      <div class="card" id="cardResultadoPesagens" style="display:none">
+        <div class="cardh">Resultado da importação</div>
+        <div class="cardb table-wrap">
+          <table>
+            <thead><tr><th>Linha</th><th>Brinco</th><th>Status</th></tr></thead>
+            <tbody id="tabelaResultadoPesagens"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: registrar pesagem -->
+  <div class="modal-overlay" id="modalPesagem" style="display:none">
+    <div class="modal-box">
+      <div class="modal-head">
+        <span id="modalPesagemTitulo">Registrar pesagem</span>
+        <button class="modal-close" onclick="fecharModal('modalPesagem')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="msgPesagem" class="msg"></div>
+        <div class="frow cols-1">
+          <div class="fgroup"><label>Data da pesagem</label><input id="p_data_pesagem" type="date"></div>
+        </div>
+        <div class="frow cols-1">
+          <div class="fgroup"><label>Peso (kg)</label><input id="p_peso" type="number" step="0.01" placeholder="280"></div>
+        </div>
+        <div id="historicoPesagens" style="color:var(--text-dim);font-size:12px"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-primary" id="btnSalvarPesagem" onclick="salvarPesagem()">Registrar</button>
+        <button class="btn btn-secondary" onclick="fecharModal('modalPesagem')">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: registrar venda -->
+  <div class="modal-overlay" id="modalVenda" style="display:none">
+    <div class="modal-box">
+      <div class="modal-head">
+        <span id="modalVendaTitulo">Registrar venda</span>
+        <button class="modal-close" onclick="fecharModal('modalVenda')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="msgVenda" class="msg"></div>
+        <div class="frow cols-1">
+          <div class="fgroup"><label>Data da venda *</label><input id="v_data_venda" type="date"></div>
+        </div>
+        <div class="frow">
+          <div class="fgroup"><label>Peso de saída (kg) *</label><input id="v_peso_saida" type="number" step="0.01" placeholder="480"></div>
+          <div class="fgroup"><label>Valor da venda (R$)</label><input id="v_preco_venda" type="number" step="0.01" placeholder="4500"></div>
+        </div>
+        <div class="frow cols-1">
+          <div class="fgroup"><label>Comprador</label><input id="v_comprador" placeholder="Nome do comprador"></div>
+        </div>
+        <div class="frow cols-1">
+          <div class="fgroup">
+            <label>Venda em lote (opcional)</label>
+            <select id="v_venda_id"><option value="">Sem vínculo / venda individual</option></select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-primary" id="btnSalvarVenda" onclick="salvarVenda()">Confirmar venda</button>
+        <button class="btn btn-secondary" onclick="fecharModal('modalVenda')">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: registrar morte -->
+  <div class="modal-overlay" id="modalMorte" style="display:none">
+    <div class="modal-box">
+      <div class="modal-head">
+        <span id="modalMorteTitulo">Registrar morte</span>
+        <button class="modal-close" onclick="fecharModal('modalMorte')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="msgMorte" class="msg"></div>
+        <div class="frow cols-1">
+          <div class="fgroup"><label>Data do óbito *</label><input id="d_data_morte" type="date"></div>
+        </div>
+        <div class="frow cols-1">
+          <div class="fgroup"><label>Causa</label><input id="d_causa_morte" placeholder="Ex: pneumonia, acidente..."></div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-danger" id="btnSalvarMorte" onclick="salvarMorte()">Confirmar óbito</button>
+        <button class="btn btn-secondary" onclick="fecharModal('modalMorte')">Cancelar</button>
+      </div>
+    </div>
+  </div>
+  <!-- Modal: transferir animal -->
+  <div class="modal-overlay" id="modalTransferencia" style="display:none">
+    <div class="modal-box">
+      <div class="modal-head">
+        <span id="modalTransferenciaTitulo">Transferir animal</span>
+        <button class="modal-close" onclick="fecharModal('modalTransferencia')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="msgTransferencia" class="msg"></div>
+        <div class="frow cols-1">
+          <div class="fgroup">
+            <label>Fazenda de destino *</label>
+            <select id="t_fazenda_id" onchange="carregarLotesEMangas(this.value, null, null, 't_lote_id', 't_manga_id')"><option value="">Carregando...</option></select>
+          </div>
+        </div>
+        <div class="frow">
+          <div class="fgroup">
+            <label>Lote de destino</label>
+            <select id="t_lote_id"><option value="">Sem lote</option></select>
+          </div>
+          <div class="fgroup">
+            <label>Manga de destino</label>
+            <select id="t_manga_id"><option value="">Sem manga</option></select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-warning" id="btnSalvarTransferencia" onclick="salvarTransferencia()">Confirmar transferência</button>
+        <button class="btn btn-secondary" onclick="fecharModal('modalTransferencia')">Cancelar</button>
+      </div>
+    </div>
+  </div>
+`;
+
+let animalEditandoId = null;
+let animaisCache = [];
+let acaoAnimalId = null;
+let acaoAnimalBrinco = null;
+
+// ---------- Navegação entre abas ----------
+function mostrarAba(aba) {
+  document.getElementById('abaLista').style.display = aba === 'lista' ? 'block' : 'none';
+  document.getElementById('abaCadastro').style.display = aba === 'cadastro' ? 'block' : 'none';
+  document.getElementById('abaImportar').style.display = aba === 'importar' ? 'block' : 'none';
+  document.getElementById('btnTabLista').classList.toggle('active', aba === 'lista');
+  document.getElementById('btnTabCadastro').classList.toggle('active', aba === 'cadastro');
+  document.getElementById('btnTabImportar').classList.toggle('active', aba === 'importar');
+  if (aba === 'lista') carregarAnimais();
+  if (aba === 'cadastro') carregarSelectsCadastro();
+}
+
+function mostrarSubImportar(sub) {
+  document.getElementById('subImportarAnimais').style.display = sub === 'animais' ? 'block' : 'none';
+  document.getElementById('subImportarPesagens').style.display = sub === 'pesagens' ? 'block' : 'none';
+  document.getElementById('btnSubImportarAnimais').classList.toggle('active', sub === 'animais');
+  document.getElementById('btnSubImportarPesagens').classList.toggle('active', sub === 'pesagens');
+}
+
+function limparFormulario() {
+  animalEditandoId = null;
+  ['a_brinco','a_sexo','a_categoria','a_raca','a_pelagem','a_marca','a_fazenda_id','a_lote_id','a_manga_id',
+   'a_data_nascimento','a_data_desmame','a_produtor_origem','a_compra_id','a_peso_entrada','a_preco_compra_kg',
+   'a_frete_compra','a_observacoes'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('a_castrado').checked = false;
+  document.getElementById('a_custo_total').value = '';
+  document.getElementById('a_custo_por_kg').value = '';
+  document.getElementById('a_idade_meses').value = '';
+  infoComissaoCompra = null;
+  document.getElementById('a_data_entrada').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('btnSalvarAnimal').textContent = 'Cadastrar animal';
+  document.getElementById('msgCadastro').className = 'msg';
+}
+
+function showMsg(elId, text, type) {
+  const el = document.getElementById(elId);
+  el.textContent = text;
+  el.className = 'msg show ' + type;
+  setTimeout(() => { el.className = 'msg'; }, 4000);
+}
+
+// ---------- Selects (fazenda / lote / manga) ----------
+async function carregarSelectsCadastro() {
+  const selFazenda = document.getElementById('a_fazenda_id');
+  const valorAtual = selFazenda.value;
+
+  const { data: fazendas, error } = await supabaseClient.from('fazendas').select('id, nome').order('nome');
+
+  if (error) {
+    selFazenda.innerHTML = `<option value="">Erro ao carregar fazendas</option>`;
+    return;
+  }
+  if (!fazendas || fazendas.length === 0) {
+    selFazenda.innerHTML = `<option value="">Nenhuma fazenda cadastrada — cadastre uma primeiro</option>`;
+    return;
+  }
+
+  selFazenda.innerHTML = `<option value="">Selecione...</option>` +
+    fazendas.map(f => `<option value="${f.id}">${f.nome}</option>`).join('');
+
+  if (valorAtual) selFazenda.value = valorAtual;
+
+  const selCompra = document.getElementById('a_compra_id');
+  const { data: compras } = await supabaseClient
+    .from('compras')
+    .select('id, codigo, data_compra, vendedor, nota_fiscal')
+    .order('data_compra', { ascending: false });
+
+  selCompra.innerHTML = `<option value="">Sem vínculo / compra individual</option>` +
+    (compras || []).map(c => {
+      const data = new Date(c.data_compra + 'T00:00:00').toLocaleDateString('pt-BR');
+      const label = [`#${c.codigo}`, data, c.vendedor, c.nota_fiscal ? 'NF ' + c.nota_fiscal : null].filter(Boolean).join(' — ');
+      return `<option value="${c.id}">${label}</option>`;
+    }).join('');
+}
+
+async function carregarLotesEMangas(fazendaId, lotePreSelecionado, mangaPreSelecionado, idLote, idManga) {
+  const selLote = document.getElementById(idLote || 'a_lote_id');
+  const selManga = document.getElementById(idManga || 'a_manga_id');
+
+  if (!fazendaId) {
+    selLote.innerHTML = `<option value="">Selecione a fazenda primeiro</option>`;
+    selManga.innerHTML = `<option value="">Selecione a fazenda primeiro</option>`;
+    return;
+  }
+
+  selLote.innerHTML = `<option value="">Carregando...</option>`;
+  selManga.innerHTML = `<option value="">Carregando...</option>`;
+
+  const [{ data: lotes }, { data: mangas }] = await Promise.all([
+    supabaseClient.from('lotes').select('id, nome').eq('fazenda_id', fazendaId).order('nome'),
+    supabaseClient.from('mangas').select('id, numero').eq('fazenda_id', fazendaId).order('numero'),
+  ]);
+
+  selLote.innerHTML = `<option value="">Sem lote</option>` +
+    (lotes || []).map(l => `<option value="${l.id}">${l.nome}</option>`).join('');
+  selManga.innerHTML = `<option value="">Sem manga</option>` +
+    (mangas || []).map(m => `<option value="${m.id}">Manga ${m.numero}</option>`).join('');
+
+  if (lotePreSelecionado) selLote.value = lotePreSelecionado;
+  if (mangaPreSelecionado) selManga.value = mangaPreSelecionado;
+}
+
+function recalcularIdade() {
+  const nascimento = document.getElementById('a_data_nascimento').value;
+  const entrada = document.getElementById('a_data_entrada').value;
+  const el = document.getElementById('a_idade_meses');
+  if (!nascimento || !entrada) { el.value = ''; return; }
+
+  const dNasc = new Date(nascimento + 'T00:00:00');
+  const dEntr = new Date(entrada + 'T00:00:00');
+  if (dEntr < dNasc) { el.value = ''; return; }
+
+  let meses = (dEntr.getFullYear() - dNasc.getFullYear()) * 12 + (dEntr.getMonth() - dNasc.getMonth());
+  if (dEntr.getDate() < dNasc.getDate()) meses--;
+  el.value = Math.max(0, meses) + ' meses';
+}
+
+// Guarda a comissão da compra vinculada e o peso dos OUTROS animais já ligados a ela,
+// pra ratear a comissão por peso entre todos os animais da compra (esse animal incluso).
+let infoComissaoCompra = null;
+
+async function carregarInfoComissaoCompra(compraId) {
+  if (!compraId) { infoComissaoCompra = null; recalcularCustoTotal(); return; }
+
+  const [{ data: compra }, { data: outrosAnimais }] = await Promise.all([
+    supabaseClient.from('compras').select('valor_comissao').eq('id', compraId).single(),
+    supabaseClient.from('animais').select('peso_entrada').eq('compra_id', compraId).neq('id', animalEditandoId || '00000000-0000-0000-0000-000000000000'),
+  ]);
+
+  infoComissaoCompra = {
+    valorComissao: Number(compra?.valor_comissao) || 0,
+    pesoOutrosAnimais: (outrosAnimais || []).reduce((s, a) => s + (Number(a.peso_entrada) || 0), 0),
+  };
+  recalcularCustoTotal();
+}
+
+function recalcularCustoTotal() {
+  const peso = parseFloat(document.getElementById('a_peso_entrada').value) || 0;
+  const precoKg = parseFloat(document.getElementById('a_preco_compra_kg').value) || 0;
+  const frete = parseFloat(document.getElementById('a_frete_compra').value) || 0;
+
+  const custoBase = (peso && precoKg) ? (peso * precoKg + frete) : 0;
+  document.getElementById('a_custo_total').value = custoBase ? custoBase.toFixed(2) : '';
+
+  let comissaoRateada = 0;
+  if (infoComissaoCompra && infoComissaoCompra.valorComissao > 0 && peso > 0) {
+    const pesoTotalCompra = infoComissaoCompra.pesoOutrosAnimais + peso;
+    if (pesoTotalCompra > 0) comissaoRateada = infoComissaoCompra.valorComissao * (peso / pesoTotalCompra);
+  }
+
+  const custoComComissao = custoBase + comissaoRateada;
+  document.getElementById('a_custo_por_kg').value = (peso && custoComComissao) ? 'R$ ' + (custoComComissao / peso).toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : '';
+}
+
+// ---------- Lista ----------
+async function carregarFiltroFazendas() {
+  const sel = document.getElementById('filtroFazenda');
+  const { data: fazendas } = await supabaseClient.from('fazendas').select('id, nome').order('nome');
+  sel.innerHTML = `<option value="">Todas as fazendas</option>` +
+    (fazendas || []).map(f => `<option value="${f.id}">${f.nome}</option>`).join('');
+}
+
+async function carregarAnimais() {
+  carregarFiltroFazendas();
+
+  let animais;
+  try {
+    animais = await buscarPaginado(() => supabaseClient
+      .from('vw_animais_resumo')
+      .select('*')
+      .order('data_entrada', { ascending: false }));
+  } catch (error) {
+    document.getElementById('tabelaAnimais').innerHTML = `<tr class="empty-row"><td colspan="9">Erro ao carregar: ${error.message}</td></tr>`;
+    return;
+  }
+
+  animaisCache = animais || [];
+  document.getElementById('totalAnimais').textContent =
+    `${animaisCache.length} animal${animaisCache.length === 1 ? '' : 'is'} cadastrado${animaisCache.length === 1 ? '' : 's'}`;
+
+  aplicarFiltros();
+}
+
+function aplicarFiltros() {
+  const fazendaId = document.getElementById('filtroFazenda').value;
+  const status = document.getElementById('filtroStatus').value;
+  const busca = document.getElementById('filtroBusca').value.trim().toLowerCase();
+
+  const filtrados = animaisCache.filter(a => {
+    if (fazendaId && a.fazenda_id !== fazendaId) return false;
+    if (status && a.status !== status) return false;
+    if (busca && !String(a.brinco).toLowerCase().includes(busca)) return false;
+    return true;
+  });
+
+  renderTabelaAnimais(filtrados);
+}
+
+function renderTabelaAnimais(lista) {
+  if (lista.length === 0) {
+    document.getElementById('tabelaAnimais').innerHTML = '<tr class="empty-row"><td colspan="9">Nenhum animal encontrado.</td></tr>';
+    return;
+  }
+
+  document.getElementById('tabelaAnimais').innerHTML = lista.map(a => {
+    let statusBadge = '<span class="badge bg-success">Ativo</span>';
+    if (a.status === 'vendido') statusBadge = '<span class="badge bg-info">Vendido</span>';
+    else if (a.status === 'morto') statusBadge = '<span class="badge bg-danger">Morto</span>';
+
+    const localizacao = [a.lote_nome, a.manga_numero ? `Manga ${a.manga_numero}` : null].filter(Boolean).join(' / ') || '—';
+    const sexoCategoria = [a.sexo, a.categoria].filter(Boolean).join(' · ') || '—';
+    const acoesAtivo = a.status === 'ativo' ? `
+        <button class="btn btn-warning" style="padding:4px 10px" title="Transferir (fazenda/lote/manga)" onclick="abrirModalTransferencia('${a.id}','${a.brinco}')"><i class="ti ti-arrows-exchange"></i></button>
+        <button class="btn btn-success" style="padding:4px 10px" title="Registrar venda" onclick="abrirModalVenda('${a.id}','${a.brinco}')"><i class="ti ti-cash-banknote"></i></button>
+        <button class="btn btn-danger" style="padding:4px 10px" title="Registrar óbito" onclick="abrirModalMorte('${a.id}','${a.brinco}')"><i class="ti ti-skull"></i></button>
+      ` : '';
+
+    return `
+      <tr>
+        <td><b style="color:var(--text)">#${a.brinco}</b></td>
+        <td>${a.fazenda_nome || '—'}</td>
+        <td>${localizacao}</td>
+        <td>${sexoCategoria}</td>
+        <td>${a.peso_atual !== null ? Number(a.peso_atual).toLocaleString('pt-BR') + ' kg' : '—'}</td>
+        <td>${a.gmd_atual !== null ? Number(a.gmd_atual).toFixed(2) + ' kg/d' : '—'}</td>
+        <td>${a.dias_no_ciclo !== null ? a.dias_no_ciclo + ' dias' : '—'}</td>
+        <td>${statusBadge}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-info" style="padding:4px 10px" title="Registrar pesagem" onclick="abrirModalPesagem('${a.id}','${a.brinco}')"><i class="ti ti-scale"></i></button>
+          <button class="btn btn-secondary" style="padding:4px 10px" title="Editar" onclick="editarAnimal('${a.id}')"><i class="ti ti-pencil"></i></button>
+          ${acoesAtivo}
+          <button class="btn btn-danger" style="padding:4px 10px" title="Excluir" onclick="excluirAnimal('${a.id}','${a.brinco}')"><i class="ti ti-trash"></i></button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// ---------- CRUD animal ----------
+async function editarAnimal(id) {
+  const { data: a, error } = await supabaseClient.from('animais').select('*').eq('id', id).single();
+  if (error) { alert('Erro ao carregar animal: ' + error.message); return; }
+
+  animalEditandoId = id;
+  mostrarAba('cadastro');
+  await carregarSelectsCadastro();
+
+  document.getElementById('a_brinco').value = a.brinco || '';
+  document.getElementById('a_sexo').value = a.sexo || '';
+  document.getElementById('a_categoria').value = a.categoria || '';
+  document.getElementById('a_raca').value = a.raca || '';
+  document.getElementById('a_pelagem').value = a.pelagem || '';
+  document.getElementById('a_marca').value = a.marca || '';
+  document.getElementById('a_castrado').checked = !!a.castrado;
+  document.getElementById('a_fazenda_id').value = a.fazenda_id || '';
+  await carregarLotesEMangas(a.fazenda_id, a.lote_id, a.manga_id);
+  document.getElementById('a_data_nascimento').value = a.data_nascimento || '';
+  document.getElementById('a_data_desmame').value = a.data_desmame || '';
+  document.getElementById('a_data_entrada').value = a.data_entrada || '';
+  document.getElementById('a_produtor_origem').value = a.produtor_origem || '';
+  document.getElementById('a_compra_id').value = a.compra_id || '';
+  document.getElementById('a_peso_entrada').value = a.peso_entrada || '';
+  document.getElementById('a_preco_compra_kg').value = a.preco_compra_kg || '';
+  document.getElementById('a_frete_compra').value = a.frete_compra || '';
+  document.getElementById('a_custo_total').value = a.custo_total || '';
+  document.getElementById('a_observacoes').value = a.observacoes || '';
+  document.getElementById('btnSalvarAnimal').textContent = 'Salvar alterações';
+  recalcularIdade();
+  await carregarInfoComissaoCompra(a.compra_id || '');
+}
+
+async function excluirAnimal(id, brinco) {
+  if (!confirm(`Excluir o animal #${brinco}? Essa ação não pode ser desfeita (inclui o histórico de pesagens).`)) return;
+
+  await supabaseClient.from('pesagens').delete().eq('animal_id', id);
+  const { error } = await supabaseClient.from('animais').delete().eq('id', id);
+  if (error) {
+    alert('Não foi possível excluir: ' + error.message);
+    return;
+  }
+  carregarAnimais();
+}
+
+async function salvarAnimal() {
+  const brinco = document.getElementById('a_brinco').value.trim();
+  const sexo = document.getElementById('a_sexo').value;
+  const fazendaId = document.getElementById('a_fazenda_id').value;
+  const dataEntrada = document.getElementById('a_data_entrada').value;
+  const pesoEntrada = document.getElementById('a_peso_entrada').value;
+
+  if (!brinco) { showMsg('msgCadastro', 'O brinco é obrigatório.', 'error'); return; }
+  if (!sexo) { showMsg('msgCadastro', 'Selecione o sexo do animal.', 'error'); return; }
+  if (!fazendaId) { showMsg('msgCadastro', 'Selecione a fazenda.', 'error'); return; }
+  if (!dataEntrada) { showMsg('msgCadastro', 'A data de entrada é obrigatória.', 'error'); return; }
+  if (!pesoEntrada) { showMsg('msgCadastro', 'O peso de entrada é obrigatório.', 'error'); return; }
+
+  const payload = {
+    brinco,
+    sexo,
+    categoria: document.getElementById('a_categoria').value || null,
+    raca: document.getElementById('a_raca').value.trim() || null,
+    pelagem: document.getElementById('a_pelagem').value.trim() || null,
+    marca: document.getElementById('a_marca').value.trim() || null,
+    castrado: document.getElementById('a_castrado').checked,
+    fazenda_id: fazendaId,
+    lote_id: document.getElementById('a_lote_id').value || null,
+    manga_id: document.getElementById('a_manga_id').value || null,
+    data_nascimento: document.getElementById('a_data_nascimento').value || null,
+    data_desmame: document.getElementById('a_data_desmame').value || null,
+    data_entrada: dataEntrada,
+    produtor_origem: document.getElementById('a_produtor_origem').value.trim() || null,
+    compra_id: document.getElementById('a_compra_id').value || null,
+    peso_entrada: Number(pesoEntrada),
+    preco_compra_kg: document.getElementById('a_preco_compra_kg').value ? Number(document.getElementById('a_preco_compra_kg').value) : null,
+    frete_compra: document.getElementById('a_frete_compra').value ? Number(document.getElementById('a_frete_compra').value) : 0,
+    observacoes: document.getElementById('a_observacoes').value.trim() || null,
+  };
+
+  const btn = document.getElementById('btnSalvarAnimal');
+  btn.disabled = true;
+
+  let error;
+  if (animalEditandoId) {
+    ({ error } = await supabaseClient.from('animais').update(payload).eq('id', animalEditandoId));
+  } else {
+    ({ error } = await supabaseClient.from('animais').insert(payload));
+  }
+
+  btn.disabled = false;
+
+  if (error) {
+    const msg = error.code === '23505'
+      ? 'Já existe um animal cadastrado com esse brinco.'
+      : 'Erro ao salvar: ' + error.message;
+    showMsg('msgCadastro', msg, 'error');
+    return;
+  }
+
+  showMsg('msgCadastro', animalEditandoId ? 'Animal atualizado com sucesso!' : 'Animal cadastrado com sucesso!', 'success');
+  limparFormulario();
+  mostrarAba('lista');
+}
+
+document.getElementById('btnSalvarAnimal').addEventListener('click', salvarAnimal);
+
+// ---------- Modal: pesagem ----------
+async function abrirModalPesagem(animalId, brinco) {
+  acaoAnimalId = animalId;
+  acaoAnimalBrinco = brinco;
+  document.getElementById('modalPesagemTitulo').textContent = `Registrar pesagem — #${brinco}`;
+  document.getElementById('p_data_pesagem').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('p_peso').value = '';
+  document.getElementById('msgPesagem').className = 'msg';
+  document.getElementById('modalPesagem').style.display = 'flex';
+  await carregarHistoricoPesagens(animalId);
+}
+
+async function carregarHistoricoPesagens(animalId) {
+  document.getElementById('historicoPesagens').innerHTML = 'Carregando histórico...';
+
+  const { data: historico } = await supabaseClient
+    .from('pesagens')
+    .select('id, data_pesagem, peso, gmd_periodo')
+    .eq('animal_id', animalId)
+    .order('data_pesagem', { ascending: false })
+    .limit(5);
+
+  if (!historico || historico.length === 0) {
+    document.getElementById('historicoPesagens').innerHTML = 'Nenhuma pesagem registrada ainda.';
+    return;
+  }
+
+  document.getElementById('historicoPesagens').innerHTML = `
+    <b style="color:var(--text-muted)">Últimas pesagens</b>
+    <table class="mini-table">
+      ${historico.map(h => `
+        <tr>
+          <td>${new Date(h.data_pesagem + 'T00:00:00').toLocaleDateString('pt-BR')}</td>
+          <td>${Number(h.peso).toLocaleString('pt-BR')} kg</td>
+          <td>${h.gmd_periodo !== null ? Number(h.gmd_periodo).toFixed(2) + ' kg/d' : '—'}</td>
+          <td><button class="btn btn-danger" style="padding:2px 7px" title="Excluir essa pesagem" onclick="excluirPesagemHistorico('${h.id}','${animalId}')"><i class="ti ti-trash"></i></button></td>
+        </tr>
+      `).join('')}
+    </table>
+  `;
+}
+
+async function excluirPesagemHistorico(pesagemId, animalId) {
+  if (!confirm('Excluir essa pesagem? O GMD desse animal será recalculado automaticamente sem ela.')) return;
+
+  const { error } = await supabaseClient.from('pesagens').delete().eq('id', pesagemId);
+  if (error) {
+    showMsg('msgPesagem', 'Erro ao excluir: ' + error.message, 'error');
+    return;
+  }
+
+  await carregarHistoricoPesagens(animalId);
+  carregarAnimais();
+}
+
+async function salvarPesagem() {
+  const data = document.getElementById('p_data_pesagem').value;
+  const peso = document.getElementById('p_peso').value;
+
+  if (!data) { showMsg('msgPesagem', 'Informe a data da pesagem.', 'error'); return; }
+  if (!peso) { showMsg('msgPesagem', 'Informe o peso.', 'error'); return; }
+
+  const btn = document.getElementById('btnSalvarPesagem');
+  btn.disabled = true;
+
+  const { error } = await supabaseClient.from('pesagens').insert({
+    animal_id: acaoAnimalId,
+    data_pesagem: data,
+    peso: Number(peso),
+  });
+
+  btn.disabled = false;
+
+  if (error) {
+    const motivo = error.code === '23505'
+      ? `Já existe uma pesagem registrada pra esse animal em ${new Date(data + 'T00:00:00').toLocaleDateString('pt-BR')}. Exclua ou edite a pesagem existente no histórico se quiser corrigir o valor.`
+      : 'Erro ao registrar: ' + error.message;
+    showMsg('msgPesagem', motivo, 'error');
+    return;
+  }
+
+  fecharModal('modalPesagem');
+  carregarAnimais();
+}
+
+// ---------- Modal: venda ----------
+function abrirModalVenda(animalId, brinco) {
+  acaoAnimalId = animalId;
+  acaoAnimalBrinco = brinco;
+  document.getElementById('modalVendaTitulo').textContent = `Registrar venda — #${brinco}`;
+  document.getElementById('v_data_venda').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('v_peso_saida').value = '';
+  document.getElementById('v_preco_venda').value = '';
+  document.getElementById('v_comprador').value = '';
+  document.getElementById('msgVenda').className = 'msg';
+  document.getElementById('modalVenda').style.display = 'flex';
+  carregarVendasNoSelect();
+}
+
+async function carregarVendasNoSelect() {
+  const sel = document.getElementById('v_venda_id');
+  sel.innerHTML = `<option value="">Carregando...</option>`;
+
+  const { data: vendas } = await supabaseClient
+    .from('vendas')
+    .select('id, data_venda, comprador, nota_fiscal')
+    .order('data_venda', { ascending: false });
+
+  sel.innerHTML = `<option value="">Sem vínculo / venda individual</option>` +
+    (vendas || []).map(v => {
+      const data = new Date(v.data_venda + 'T00:00:00').toLocaleDateString('pt-BR');
+      const label = [data, v.comprador, v.nota_fiscal ? 'NF ' + v.nota_fiscal : null].filter(Boolean).join(' — ');
+      return `<option value="${v.id}">${label}</option>`;
+    }).join('');
+}
+
+async function salvarVenda() {
+  const dataVenda = document.getElementById('v_data_venda').value;
+  const pesoSaida = document.getElementById('v_peso_saida').value;
+
+  if (!dataVenda) { showMsg('msgVenda', 'Informe a data da venda.', 'error'); return; }
+  if (!pesoSaida) { showMsg('msgVenda', 'Informe o peso de saída.', 'error'); return; }
+
+  const btn = document.getElementById('btnSalvarVenda');
+  btn.disabled = true;
+
+  const { error } = await supabaseClient.from('animais').update({
+    status: 'vendido',
+    data_venda: dataVenda,
+    peso_saida: Number(pesoSaida),
+    preco_venda: document.getElementById('v_preco_venda').value ? Number(document.getElementById('v_preco_venda').value) : null,
+    comprador: document.getElementById('v_comprador').value.trim() || null,
+    venda_id: document.getElementById('v_venda_id').value || null,
+  }).eq('id', acaoAnimalId);
+
+  btn.disabled = false;
+
+  if (error) {
+    showMsg('msgVenda', 'Erro ao registrar venda: ' + error.message, 'error');
+    return;
+  }
+
+  fecharModal('modalVenda');
+  carregarAnimais();
+}
+
+// ---------- Modal: morte ----------
+function abrirModalMorte(animalId, brinco) {
+  acaoAnimalId = animalId;
+  acaoAnimalBrinco = brinco;
+  document.getElementById('modalMorteTitulo').textContent = `Registrar óbito — #${brinco}`;
+  document.getElementById('d_data_morte').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('d_causa_morte').value = '';
+  document.getElementById('msgMorte').className = 'msg';
+  document.getElementById('modalMorte').style.display = 'flex';
+}
+
+async function salvarMorte() {
+  const dataMorte = document.getElementById('d_data_morte').value;
+  if (!dataMorte) { showMsg('msgMorte', 'Informe a data do óbito.', 'error'); return; }
+
+  if (!confirm(`Confirmar óbito do animal #${acaoAnimalBrinco}? Essa ação altera o status para "morto".`)) return;
+
+  const btn = document.getElementById('btnSalvarMorte');
+  btn.disabled = true;
+
+  const { error } = await supabaseClient.from('animais').update({
+    status: 'morto',
+    data_morte: dataMorte,
+    causa_morte: document.getElementById('d_causa_morte').value.trim() || null,
+  }).eq('id', acaoAnimalId);
+
+  btn.disabled = false;
+
+  if (error) {
+    showMsg('msgMorte', 'Erro ao registrar óbito: ' + error.message, 'error');
+    return;
+  }
+
+  fecharModal('modalMorte');
+  carregarAnimais();
+}
+
+// ---------- Importação de planilhas ----------
+// Roda `worker` sobre `items` com no máximo `limite` chamadas em paralelo,
+// pra não disparar centenas de requisições sequenciais (lento e sem
+// feedback) nem todas de uma vez (risco de sobrecarregar/limitar a API).
+async function executarComConcorrencia(items, limite, worker, aoProgredir) {
+  let indice = 0, concluidos = 0;
+  async function proximo() {
+    while (indice < items.length) {
+      const item = items[indice++];
+      await worker(item);
+      concluidos++;
+      if (aoProgredir) aoProgredir(concluidos, items.length);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limite, items.length) }, proximo));
+}
+
+function normalizarTexto(s) {
+  return String(s ?? '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function normalizarCabecalho(s) {
+  return normalizarTexto(s).replace(/[^a-z0-9]/g, '');
+}
+
+function excelDateParaISO(valor) {
+  if (valor === '' || valor === null || valor === undefined) return null;
+  if (valor instanceof Date) {
+    const ano = valor.getUTCFullYear();
+    const mes = String(valor.getUTCMonth() + 1).padStart(2, '0');
+    const dia = String(valor.getUTCDate()).padStart(2, '0');
+    return `${ano}-${mes}-${dia}`;
+  }
+  if (typeof valor === 'number') {
+    const d = XLSX.SSF.parse_date_code(valor);
+    if (!d) return null;
+    return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
+  }
+  const texto = String(valor).trim();
+  let m = texto.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  m = texto.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  return null;
+}
+
+function lerArquivoComoLinhas(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const matriz = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true });
+        if (matriz.length === 0) { resolve([]); return; }
+
+        const mapaColunas = {};
+        matriz[0].forEach((cabecalho, idx) => { mapaColunas[normalizarCabecalho(cabecalho)] = idx; });
+
+        const linhas = [];
+        for (let i = 1; i < matriz.length; i++) {
+          const linhaBruta = matriz[i];
+          const vazia = linhaBruta.every(v => v === '' || v === null || v === undefined);
+          if (vazia) continue;
+          const obj = { __linha: i + 1 };
+          Object.entries(mapaColunas).forEach(([chave, idx]) => { obj[chave] = linhaBruta[idx]; });
+          linhas.push(obj);
+        }
+        resolve(linhas);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = () => reject(new Error('Não foi possível ler o arquivo.'));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function renderResultadoImportacao(tabelaId, cardId, resultados) {
+  document.getElementById(cardId).style.display = 'block';
+  document.getElementById(tabelaId).innerHTML = resultados.map(r => `
+    <tr>
+      <td>${r.linha}</td>
+      <td>#${r.brinco}</td>
+      <td>${r.status === 'ok'
+        ? `<span class="badge bg-success">OK</span> ${r.motivo}`
+        : `<span class="badge bg-danger">Erro</span> ${r.motivo}`}</td>
+    </tr>
+  `).join('');
+}
+
+async function processarPlanilhaAnimais() {
+  const file = document.getElementById('arquivoAnimais').files[0];
+  if (!file) { showMsg('msgImportAnimais', 'Selecione um arquivo .xlsx primeiro.', 'error'); return; }
+
+  const btn = document.getElementById('btnProcessarAnimais');
+  btn.disabled = true;
+  showMsg('msgImportAnimais', 'Lendo planilha...', 'success');
+
+  let linhas;
+  try {
+    linhas = await lerArquivoComoLinhas(file);
+  } catch (err) {
+    btn.disabled = false;
+    showMsg('msgImportAnimais', 'Erro ao ler o arquivo: ' + err.message, 'error');
+    return;
+  }
+
+  if (linhas.length === 0) {
+    btn.disabled = false;
+    showMsg('msgImportAnimais', 'A planilha não tem linhas de dados (ou só tem a linha de exemplo apagada).', 'error');
+    return;
+  }
+
+  const [{ data: fazendas }, { data: lotes }, { data: mangas }, { data: compras }] = await Promise.all([
+    supabaseClient.from('fazendas').select('id, nome'),
+    supabaseClient.from('lotes').select('id, nome, fazenda_id'),
+    supabaseClient.from('mangas').select('id, numero, fazenda_id'),
+    supabaseClient.from('compras').select('id, codigo'),
+  ]);
+
+  const mapaFazendas = new Map((fazendas || []).map(f => [normalizarTexto(f.nome), f.id]));
+  const mapaLotes = new Map((lotes || []).map(l => [`${l.fazenda_id}|${normalizarTexto(l.nome)}`, l.id]));
+  const mapaMangas = new Map((mangas || []).map(m => [`${m.fazenda_id}|${normalizarTexto(m.numero)}`, m.id]));
+  const mapaCompras = new Map((compras || []).map(c => [String(c.codigo), c.id]));
+
+  const categoriasValidas = ['Bezerro', 'Bezerra', 'Garrote', 'Novilho', 'Novilha', 'Boi', 'Vaca', 'Touro', 'Matrona', 'Vaca seca'];
+  const mapaCategorias = new Map(categoriasValidas.map(c => [normalizarTexto(c), c]));
+
+  const resultados = [];
+  const validos = [];
+
+  for (const linha of linhas) {
+    const brinco = String(linha.brinco || '').trim();
+    const erro = (msg) => resultados.push({ linha: linha.__linha, brinco: brinco || '—', status: 'erro', motivo: msg });
+
+    if (!brinco) { erro('Brinco em branco.'); continue; }
+
+    const sexoTexto = normalizarTexto(linha.sexo);
+    let sexo = null;
+    if (sexoTexto === 'macho') sexo = 'Macho';
+    else if (sexoTexto === 'femea') sexo = 'Fêmea';
+    if (!sexo) { erro('Sexo inválido (use Macho ou Fêmea).'); continue; }
+
+    const fazendaNome = String(linha.fazenda || '').trim();
+    if (!fazendaNome) { erro('Fazenda em branco.'); continue; }
+    const fazendaId = mapaFazendas.get(normalizarTexto(fazendaNome));
+    if (!fazendaId) { erro(`Fazenda "${fazendaNome}" não encontrada.`); continue; }
+
+    const dataEntrada = excelDateParaISO(linha.dataentrada);
+    if (!dataEntrada) { erro('Data de entrada inválida ou em branco.'); continue; }
+
+    const pesoEntrada = parseFloat(String(linha.pesoentrada).replace(',', '.'));
+    if (!pesoEntrada) { erro('Peso de entrada inválido ou em branco.'); continue; }
+
+    let loteId = null;
+    const loteNome = String(linha.lote || '').trim();
+    if (loteNome) {
+      loteId = mapaLotes.get(`${fazendaId}|${normalizarTexto(loteNome)}`);
+      if (!loteId) { erro(`Lote "${loteNome}" não encontrado nessa fazenda.`); continue; }
+    }
+
+    let mangaId = null;
+    const mangaNumero = String(linha.manga || '').trim();
+    if (mangaNumero) {
+      mangaId = mapaMangas.get(`${fazendaId}|${normalizarTexto(mangaNumero)}`);
+      if (!mangaId) { erro(`Manga "${mangaNumero}" não encontrada nessa fazenda.`); continue; }
+    }
+
+    let compraId = null;
+    const compraCodigo = String(linha.compra || '').trim();
+    if (compraCodigo) {
+      compraId = mapaCompras.get(compraCodigo.replace(/^#/, ''));
+      if (!compraId) { erro(`Compra #${compraCodigo} não encontrada. Confira o código na aba Compras.`); continue; }
+    }
+
+    let categoria = null;
+    const categoriaTexto = String(linha.categoria || '').trim();
+    if (categoriaTexto) {
+      categoria = mapaCategorias.get(normalizarTexto(categoriaTexto));
+      if (!categoria) { erro(`Categoria "${categoriaTexto}" inválida (use Bezerro, Bezerra, Garrote, Novilho, Novilha, Boi, Vaca, Touro, Matrona ou Vaca seca).`); continue; }
+    }
+
+    const castradoTexto = normalizarTexto(linha.castrado);
+    const castrado = castradoTexto === 'sim' || castradoTexto === 'true' || castradoTexto === '1';
+
+    const payload = {
+      brinco, sexo, categoria,
+      raca: String(linha.raca || '').trim() || null,
+      pelagem: String(linha.pelagem || '').trim() || null,
+      marca: String(linha.marca || '').trim() || null,
+      castrado,
+      fazenda_id: fazendaId,
+      lote_id: loteId,
+      manga_id: mangaId,
+      compra_id: compraId,
+      data_nascimento: excelDateParaISO(linha.datanascimento),
+      data_desmame: excelDateParaISO(linha.datadesmame),
+      data_entrada: dataEntrada,
+      produtor_origem: String(linha.produtororigem || '').trim() || null,
+      peso_entrada: pesoEntrada,
+      preco_compra_kg: linha.precocomprakg ? parseFloat(String(linha.precocomprakg).replace(',', '.')) : null,
+      frete_compra: linha.fretecompra ? parseFloat(String(linha.fretecompra).replace(',', '.')) : 0,
+      observacoes: String(linha.observacoes || '').trim() || null,
+    };
+
+    validos.push({ linha: linha.__linha, brinco, payload });
+  }
+
+  await executarComConcorrencia(validos, 8, async (item) => {
+    try {
+      const { error } = await supabaseClient.from('animais').insert(item.payload);
+      if (error) {
+        const motivo = error.code === '23505' ? 'Já existe um animal com esse brinco.' : error.message;
+        resultados.push({ linha: item.linha, brinco: item.brinco, status: 'erro', motivo });
+      } else {
+        resultados.push({ linha: item.linha, brinco: item.brinco, status: 'ok', motivo: 'Importado com sucesso.' });
+      }
+    } catch (err) {
+      resultados.push({ linha: item.linha, brinco: item.brinco, status: 'erro', motivo: 'Falha de conexão: ' + (err.message || err) });
+    }
+  }, (feitos, total) => {
+    showMsg('msgImportAnimais', `Importando... ${feitos} de ${total}`, 'success');
+  });
+
+  resultados.sort((a, b) => a.linha - b.linha);
+  renderResultadoImportacao('tabelaResultadoAnimais', 'cardResultadoAnimais', resultados);
+
+  const sucesso = resultados.filter(r => r.status === 'ok').length;
+  btn.disabled = false;
+  showMsg('msgImportAnimais', `${sucesso} de ${resultados.length} linha(s) importada(s) com sucesso.`, sucesso === resultados.length ? 'success' : 'error');
+
+  if (sucesso > 0) carregarAnimais();
+}
+
+async function processarPlanilhaPesagens() {
+  const file = document.getElementById('arquivoPesagens').files[0];
+  if (!file) { showMsg('msgImportPesagens', 'Selecione um arquivo .xlsx primeiro.', 'error'); return; }
+
+  const btn = document.getElementById('btnProcessarPesagens');
+  btn.disabled = true;
+  showMsg('msgImportPesagens', 'Lendo planilha...', 'success');
+
+  let linhas;
+  try {
+    linhas = await lerArquivoComoLinhas(file);
+  } catch (err) {
+    btn.disabled = false;
+    showMsg('msgImportPesagens', 'Erro ao ler o arquivo: ' + err.message, 'error');
+    return;
+  }
+
+  if (linhas.length === 0) {
+    btn.disabled = false;
+    showMsg('msgImportPesagens', 'A planilha não tem linhas de dados (ou só tem a linha de exemplo apagada).', 'error');
+    return;
+  }
+
+  const animais = await buscarPaginado(() => supabaseClient.from('animais').select('id, brinco'));
+  const mapaBrincos = new Map((animais || []).map(a => [normalizarTexto(a.brinco), a.id]));
+
+  const resultados = [];
+  const validos = [];
+
+  for (const linha of linhas) {
+    const brinco = String(linha.brinco || '').trim();
+    const erro = (msg) => resultados.push({ linha: linha.__linha, brinco: brinco || '—', status: 'erro', motivo: msg });
+
+    if (!brinco) { erro('Brinco em branco.'); continue; }
+
+    const animalId = mapaBrincos.get(normalizarTexto(brinco));
+    if (!animalId) { erro('Brinco não encontrado no cadastro de animais.'); continue; }
+
+    const dataPesagem = excelDateParaISO(linha.datapesagem);
+    if (!dataPesagem) { erro('Data de pesagem inválida ou em branco.'); continue; }
+
+    const peso = parseFloat(String(linha.peso).replace(',', '.'));
+    if (!peso) { erro('Peso inválido ou em branco.'); continue; }
+
+    validos.push({ linha: linha.__linha, brinco, payload: { animal_id: animalId, data_pesagem: dataPesagem, peso } });
+  }
+
+  await executarComConcorrencia(validos, 8, async (item) => {
+    try {
+      const { error } = await supabaseClient.from('pesagens').insert(item.payload);
+      const motivo = error
+        ? (error.code === '23505'
+            ? `Já existe pesagem registrada pra esse animal em ${new Date(item.payload.data_pesagem + 'T00:00:00').toLocaleDateString('pt-BR')}.`
+            : error.message)
+        : 'Importado com sucesso.';
+      resultados.push({
+        linha: item.linha, brinco: item.brinco,
+        status: error ? 'erro' : 'ok',
+        motivo,
+      });
+    } catch (err) {
+      resultados.push({ linha: item.linha, brinco: item.brinco, status: 'erro', motivo: 'Falha de conexão: ' + (err.message || err) });
+    }
+  }, (feitos, total) => {
+    showMsg('msgImportPesagens', `Importando... ${feitos} de ${total}`, 'success');
+  });
+
+  resultados.sort((a, b) => a.linha - b.linha);
+  renderResultadoImportacao('tabelaResultadoPesagens', 'cardResultadoPesagens', resultados);
+
+  const sucesso = resultados.filter(r => r.status === 'ok').length;
+  btn.disabled = false;
+  showMsg('msgImportPesagens', `${sucesso} de ${resultados.length} linha(s) importada(s) com sucesso.`, sucesso === resultados.length ? 'success' : 'error');
+}
+
+// ---------- Modal: transferência ----------
+async function abrirModalTransferencia(animalId, brinco) {
+  acaoAnimalId = animalId;
+  acaoAnimalBrinco = brinco;
+  document.getElementById('modalTransferenciaTitulo').textContent = `Transferir animal — #${brinco}`;
+  document.getElementById('msgTransferencia').className = 'msg';
+  document.getElementById('modalTransferencia').style.display = 'flex';
+
+  const animal = animaisCache.find(a => a.id === animalId);
+
+  const selFazenda = document.getElementById('t_fazenda_id');
+  const { data: fazendas } = await supabaseClient.from('fazendas').select('id, nome').order('nome');
+  selFazenda.innerHTML = `<option value="">Selecione...</option>` +
+    (fazendas || []).map(f => `<option value="${f.id}">${f.nome}</option>`).join('');
+
+  if (animal) {
+    selFazenda.value = animal.fazenda_id || '';
+    await carregarLotesEMangas(animal.fazenda_id, animal.lote_id, animal.manga_id, 't_lote_id', 't_manga_id');
+  }
+}
+
+async function salvarTransferencia() {
+  const fazendaId = document.getElementById('t_fazenda_id').value;
+  if (!fazendaId) { showMsg('msgTransferencia', 'Selecione a fazenda de destino.', 'error'); return; }
+
+  const btn = document.getElementById('btnSalvarTransferencia');
+  btn.disabled = true;
+
+  const { error } = await supabaseClient.from('animais').update({
+    fazenda_id: fazendaId,
+    lote_id: document.getElementById('t_lote_id').value || null,
+    manga_id: document.getElementById('t_manga_id').value || null,
+  }).eq('id', acaoAnimalId);
+
+  btn.disabled = false;
+
+  if (error) {
+    showMsg('msgTransferencia', 'Erro ao transferir: ' + error.message, 'error');
+    return;
+  }
+
+  fecharModal('modalTransferencia');
+  carregarAnimais();
+}
+
+// ---------- Modal genérico ----------
+function fecharModal(modalId) {
+  document.getElementById(modalId).style.display = 'none';
+}
+
+(async function init() {
+  await checkAuth();
+  showUserEmail();
+  document.getElementById('a_data_entrada').value = new Date().toISOString().slice(0, 10);
+  carregarAnimais();
+})();
+</script>
+
+</body>
+</html>
