@@ -1105,7 +1105,21 @@ async function processarPlanilhaAnimais() {
     validos.push({ linha: linha.__linha, brinco, payload });
   }
 
-  await executarComConcorrencia(validos, 8, async (item) => {
+  // brinco repetido dentro da própria planilha: não dá pra saber qual das linhas
+  // está certa (podem ter pesos/dados diferentes), então nenhuma delas é importada
+  const contagemBrinco = new Map();
+  validos.forEach(v => contagemBrinco.set(v.brinco, (contagemBrinco.get(v.brinco) || 0) + 1));
+  const validosSemDuplicata = [];
+  validos.forEach(v => {
+    const qtd = contagemBrinco.get(v.brinco);
+    if (qtd > 1) {
+      resultados.push({ linha: v.linha, brinco: v.brinco, status: 'erro', motivo: `Brinco ${v.brinco} não foi registrado pois está duplicado na planilha (aparece ${qtd} vezes). Corrija e reenvie só essas linhas.` });
+    } else {
+      validosSemDuplicata.push(v);
+    }
+  });
+
+  await executarComConcorrencia(validosSemDuplicata, 8, async (item) => {
     try {
       const { error } = await supabaseClient.from('animais').insert(item.payload);
       if (error) {
