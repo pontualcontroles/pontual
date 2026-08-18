@@ -33,24 +33,37 @@ document.getElementById('mainContent').innerHTML = `
 
   <div id="abaLista">
     <div class="toolbar">
-      <select id="filtroFazenda" onchange="aplicarFiltros()"><option value="">Todas as fazendas</option></select>
+      <select id="filtroFazenda" onchange="atualizarFiltrosLoteManga(); aplicarFiltros()"><option value="">Todas as fazendas</option></select>
       <select id="filtroStatus" onchange="aplicarFiltros()">
         <option value="">Todos os status</option>
         <option value="ativo">Ativo</option>
         <option value="vendido">Vendido</option>
         <option value="morto">Morto</option>
       </select>
+      <select id="filtroLote" onchange="aplicarFiltros()"><option value="">Todos os lotes</option></select>
+      <select id="filtroManga" onchange="aplicarFiltros()"><option value="">Todas as mangas</option></select>
       <input id="filtroBusca" placeholder="Buscar por brinco..." oninput="aplicarFiltros()" style="background:var(--bg-input);border:0.5px solid var(--border);border-radius:7px;padding:7px 11px;color:var(--text);font-size:12px;min-width:160px">
+    </div>
+    <div class="toolbar">
+      <textarea id="listaBrincosSelecao" placeholder="Colar lista de brincos (uma coluna do Excel, ou separados por vírgula/espaço) pra selecionar em massa..." rows="1" style="background:var(--bg-input);border:0.5px solid var(--border);border-radius:7px;padding:7px 11px;color:var(--text);font-size:12px;min-width:340px;flex:1;resize:vertical;font-family:inherit"></textarea>
+      <button class="btn btn-secondary" style="padding:6px 12px;font-size:12px" onclick="selecionarPorListaDeBrincos()"><i class="ti ti-list-check"></i> Selecionar brincos</button>
+      <span id="resumoSelecaoPorBrinco" style="font-size:12px;color:var(--text-soft)"></span>
+    </div>
+    <div class="toolbar" id="barraSelecaoAnimais" style="display:none;background:var(--bg-input);padding:8px 12px;border-radius:8px">
+      <span id="resumoSelecaoAnimais" style="font-size:12px;color:var(--text-soft)">0 selecionados</span>
+      <button class="btn btn-warning" style="padding:5px 12px;font-size:12px" onclick="abrirModalTransferenciaLote()"><i class="ti ti-arrows-exchange"></i> Transferir selecionados</button>
+      <button class="btn btn-danger" style="padding:5px 12px;font-size:12px" onclick="abrirModalExclusaoLote()"><i class="ti ti-trash"></i> Excluir</button>
+      <button class="btn btn-secondary" style="padding:5px 12px;font-size:12px" onclick="limparSelecaoAnimais()">Limpar seleção</button>
     </div>
     <div id="msgLista" class="msg"></div>
     <div class="card">
       <div class="cardb table-wrap">
         <table>
           <thead>
-            <tr><th>Brinco</th><th>Fazenda</th><th>Lote / Manga</th><th>Sexo / Categoria</th><th>Peso atual</th><th>GMD</th><th>Dias no ciclo</th><th>Status</th><th></th></tr>
+            <tr><th style="width:34px"><input type="checkbox" id="chkSelecionarTodosAnimais" onchange="alternarSelecaoTodosAnimais(this.checked)"></th><th>Brinco</th><th>Fazenda</th><th>Lote / Manga</th><th>Sexo / Categoria</th><th>Fornecedor</th><th>Peso atual</th><th>GMD</th><th>Dias no ciclo</th><th>Status</th><th></th></tr>
           </thead>
           <tbody id="tabelaAnimais">
-            <tr class="empty-row"><td colspan="9"><span class="spinner"></span> Carregando...</td></tr>
+            <tr class="empty-row"><td colspan="11"><span class="spinner"></span> Carregando...</td></tr>
           </tbody>
         </table>
       </div>
@@ -358,12 +371,39 @@ document.getElementById('mainContent').innerHTML = `
       </div>
     </div>
   </div>
+  <!-- Modal: exclusão em massa -->
+  <div class="modal-overlay" id="modalExclusaoLote" style="display:none">
+    <div class="modal-box">
+      <div class="modal-head">
+        <span id="modalExclusaoLoteTitulo">Excluir animais selecionados</span>
+        <button class="modal-close" onclick="fecharModal('modalExclusaoLote')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="msgExclusaoLote" class="msg"></div>
+        <p style="font-size:13px;color:var(--text-table)" id="avisoExclusaoLote"></p>
+        <div class="frow cols-1">
+          <div class="fgroup">
+            <label>Digite <b>excluir</b> pra confirmar</label>
+            <input id="e_confirmacao" placeholder="excluir" oninput="validarConfirmacaoExclusaoLote()" autocomplete="off">
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-danger" id="btnConfirmarExclusaoLote" onclick="confirmarExclusaoLote()" disabled>Excluir definitivamente</button>
+        <button class="btn btn-secondary" onclick="fecharModal('modalExclusaoLote')">Cancelar</button>
+      </div>
+    </div>
+  </div>
 `;
 
 let animalEditandoId = null;
 let animaisCache = [];
 let acaoAnimalId = null;
 let acaoAnimalBrinco = null;
+let animaisSelecionados = new Set();
+let ultimaListaFiltrada = [];
+let transferenciaEmLoteIds = null;
+let exclusaoEmLoteIds = [];
 
 // ---------- Navegação entre abas ----------
 function mostrarAba(aba) {
@@ -531,7 +571,8 @@ async function carregarFiltroFazendas() {
 }
 
 async function carregarAnimais() {
-  carregarFiltroFazendas();
+  await carregarFiltroFazendas();
+  animaisSelecionados.clear();
 
   let animais;
   try {
@@ -540,7 +581,7 @@ async function carregarAnimais() {
       .select('*')
       .order('data_entrada', { ascending: false }));
   } catch (error) {
-    document.getElementById('tabelaAnimais').innerHTML = `<tr class="empty-row"><td colspan="9">Erro ao carregar: ${error.message}</td></tr>`;
+    document.getElementById('tabelaAnimais').innerHTML = `<tr class="empty-row"><td colspan="11">Erro ao carregar: ${error.message}</td></tr>`;
     return;
   }
 
@@ -548,27 +589,147 @@ async function carregarAnimais() {
   document.getElementById('totalAnimais').textContent =
     `${animaisCache.length} animal${animaisCache.length === 1 ? '' : 'is'} cadastrado${animaisCache.length === 1 ? '' : 's'}`;
 
+  atualizarFiltrosLoteManga();
+  aplicarFiltros();
+}
+
+// Repopula os selects de Lote/Manga com base nos animais já carregados
+// (restrito à fazenda escolhida, se houver), sem precisar de outra consulta ao Supabase.
+function atualizarFiltrosLoteManga() {
+  const fazendaId = document.getElementById('filtroFazenda').value;
+  const selLote = document.getElementById('filtroLote');
+  const selManga = document.getElementById('filtroManga');
+  const valorLoteAtual = selLote.value;
+  const valorMangaAtual = selManga.value;
+
+  const relevantes = fazendaId ? animaisCache.filter(a => a.fazenda_id === fazendaId) : animaisCache;
+
+  const lotesUnicos = new Map();
+  relevantes.forEach(a => { if (a.lote_id) lotesUnicos.set(a.lote_id, a.lote_nome); });
+  const mangasUnicas = new Map();
+  relevantes.forEach(a => { if (a.manga_id) mangasUnicas.set(a.manga_id, a.manga_numero); });
+
+  selLote.innerHTML = `<option value="">Todos os lotes</option>` +
+    Array.from(lotesUnicos.entries()).sort((a, b) => String(a[1]).localeCompare(String(b[1]))).map(([id, nome]) => `<option value="${id}">${nome}</option>`).join('');
+  selManga.innerHTML = `<option value="">Todas as mangas</option>` +
+    Array.from(mangasUnicas.entries()).sort((a, b) => Number(a[1]) - Number(b[1])).map(([id, numero]) => `<option value="${id}">Manga ${numero}</option>`).join('');
+
+  if (lotesUnicos.has(valorLoteAtual)) selLote.value = valorLoteAtual;
+  if (mangasUnicas.has(valorMangaAtual)) selManga.value = valorMangaAtual;
+}
+
+// Garante que o select tenha a opção (caso o lote/manga não tenha nenhum
+// animal ainda e por isso não apareça derivado do animaisCache) e a seleciona.
+function garantirOpcaoSelect(selectEl, valor, texto) {
+  if (!valor) return;
+  const existe = Array.from(selectEl.options).some(o => o.value === valor);
+  if (!existe) {
+    const opt = document.createElement('option');
+    opt.value = valor;
+    opt.textContent = texto || '—';
+    selectEl.appendChild(opt);
+  }
+  selectEl.value = valor;
+}
+
+// Aplica fazenda/lote/manga vindos da URL (ex: link "ver animais" nas páginas de Lotes/Mangas)
+function aplicarFiltrosDaURL() {
+  const params = new URLSearchParams(location.search);
+  const fazendaId = params.get('fazenda');
+  const loteId = params.get('lote');
+  const mangaId = params.get('manga');
+  if (!fazendaId && !loteId && !mangaId) return;
+
+  if (fazendaId) document.getElementById('filtroFazenda').value = fazendaId;
+  atualizarFiltrosLoteManga();
+  if (loteId) garantirOpcaoSelect(document.getElementById('filtroLote'), loteId, params.get('loteLabel'));
+  if (mangaId) garantirOpcaoSelect(document.getElementById('filtroManga'), mangaId, params.get('mangaLabel'));
+
   aplicarFiltros();
 }
 
 function aplicarFiltros() {
   const fazendaId = document.getElementById('filtroFazenda').value;
   const status = document.getElementById('filtroStatus').value;
+  const loteId = document.getElementById('filtroLote').value;
+  const mangaId = document.getElementById('filtroManga').value;
   const busca = document.getElementById('filtroBusca').value.trim().toLowerCase();
 
   const filtrados = animaisCache.filter(a => {
     if (fazendaId && a.fazenda_id !== fazendaId) return false;
     if (status && a.status !== status) return false;
+    if (loteId && a.lote_id !== loteId) return false;
+    if (mangaId && a.manga_id !== mangaId) return false;
     if (busca && !String(a.brinco).toLowerCase().includes(busca)) return false;
     return true;
   });
 
+  ultimaListaFiltrada = filtrados;
   renderTabelaAnimais(filtrados);
+}
+
+// ---------- Seleção em lote (transferência) ----------
+function toggleSelecaoAnimalLista(id, marcado) {
+  if (marcado) animaisSelecionados.add(id);
+  else animaisSelecionados.delete(id);
+  atualizarBarraSelecaoAnimais();
+}
+
+// Marca a seleção a partir de uma lista de brincos colada (só animais ativos,
+// pra bater com o que o checkbox de cada linha já permite selecionar).
+function selecionarPorListaDeBrincos() {
+  const texto = document.getElementById('listaBrincosSelecao').value;
+  const brincosDigitados = Array.from(new Set(texto.split(/[\s,;]+/).map(b => b.trim()).filter(Boolean)));
+
+  if (brincosDigitados.length === 0) {
+    document.getElementById('resumoSelecaoPorBrinco').textContent = '';
+    return;
+  }
+
+  const brincosDisponiveis = new Map();
+  animaisCache.forEach(a => { if (a.status === 'ativo') brincosDisponiveis.set(String(a.brinco), a.id); });
+
+  const naoEncontrados = [];
+  let encontrados = 0;
+  brincosDigitados.forEach(b => {
+    const id = brincosDisponiveis.get(b);
+    if (id) { animaisSelecionados.add(id); encontrados++; }
+    else naoEncontrados.push(b);
+  });
+
+  document.getElementById('resumoSelecaoPorBrinco').textContent = naoEncontrados.length > 0
+    ? `${encontrados} de ${brincosDigitados.length} selecionados — não encontrados (ou não ativos): ${naoEncontrados.join(', ')}`
+    : `${encontrados} de ${brincosDigitados.length} selecionados.`;
+
+  renderTabelaAnimais(ultimaListaFiltrada);
+}
+
+function alternarSelecaoTodosAnimais(marcado) {
+  ultimaListaFiltrada.forEach(a => {
+    if (a.status !== 'ativo') return;
+    if (marcado) animaisSelecionados.add(a.id);
+    else animaisSelecionados.delete(a.id);
+  });
+  renderTabelaAnimais(ultimaListaFiltrada);
+}
+
+function limparSelecaoAnimais() {
+  animaisSelecionados.clear();
+  renderTabelaAnimais(ultimaListaFiltrada);
+}
+
+function atualizarBarraSelecaoAnimais() {
+  const n = animaisSelecionados.size;
+  document.getElementById('barraSelecaoAnimais').style.display = n > 0 ? 'flex' : 'none';
+  document.getElementById('resumoSelecaoAnimais').textContent =
+    `${n} animal${n === 1 ? '' : 'is'} selecionado${n === 1 ? '' : 's'}`;
 }
 
 function renderTabelaAnimais(lista) {
   if (lista.length === 0) {
-    document.getElementById('tabelaAnimais').innerHTML = '<tr class="empty-row"><td colspan="9">Nenhum animal encontrado.</td></tr>';
+    document.getElementById('tabelaAnimais').innerHTML = '<tr class="empty-row"><td colspan="11">Nenhum animal encontrado.</td></tr>';
+    document.getElementById('chkSelecionarTodosAnimais').checked = false;
+    atualizarBarraSelecaoAnimais();
     return;
   }
 
@@ -584,13 +745,18 @@ function renderTabelaAnimais(lista) {
         <button class="btn btn-success" style="padding:4px 10px" title="Registrar venda" onclick="abrirModalVenda('${a.id}','${a.brinco}')"><i class="ti ti-cash-banknote"></i></button>
         <button class="btn btn-danger" style="padding:4px 10px" title="Registrar óbito" onclick="abrirModalMorte('${a.id}','${a.brinco}')"><i class="ti ti-skull"></i></button>
       ` : '';
+    const checkboxSelecao = a.status === 'ativo'
+      ? `<input type="checkbox" ${animaisSelecionados.has(a.id) ? 'checked' : ''} onchange="toggleSelecaoAnimalLista('${a.id}', this.checked)">`
+      : '';
 
     return `
       <tr>
+        <td>${checkboxSelecao}</td>
         <td><b style="color:var(--text)">#${a.brinco}</b></td>
         <td>${a.fazenda_nome || '—'}</td>
         <td>${localizacao}</td>
         <td>${sexoCategoria}</td>
+        <td>${a.fornecedor || '—'}</td>
         <td>${a.peso_atual !== null ? Number(a.peso_atual).toLocaleString('pt-BR') + ' kg' : '—'}</td>
         <td>${a.gmd_atual !== null ? Number(a.gmd_atual).toFixed(2) + ' kg/d' : '—'}</td>
         <td>${a.dias_no_ciclo !== null ? a.dias_no_ciclo + ' dias' : '—'}</td>
@@ -604,6 +770,11 @@ function renderTabelaAnimais(lista) {
       </tr>
     `;
   }).join('');
+
+  const ativosNaLista = lista.filter(a => a.status === 'ativo');
+  const todosMarcados = ativosNaLista.length > 0 && ativosNaLista.every(a => animaisSelecionados.has(a.id));
+  document.getElementById('chkSelecionarTodosAnimais').checked = todosMarcados;
+  atualizarBarraSelecaoAnimais();
 }
 
 // ---------- CRUD animal ----------
@@ -639,8 +810,29 @@ async function editarAnimal(id) {
   await carregarInfoComissaoCompra(a.compra_id || '');
 }
 
+// Grava no banco (tabela log_exclusoes) os dados completos (animal + pesagens) antes de
+// excluir de verdade — fica guardado no sistema pra exportar quando quiser, em Relatórios.
+async function registrarLogExclusao(idsAnimais) {
+  const [{ data: animaisExcluidos }, { data: pesagensExcluidas }, { data: { session } }] = await Promise.all([
+    supabaseClient.from('animais').select('*').in('id', idsAnimais),
+    supabaseClient.from('pesagens').select('*').in('animal_id', idsAnimais),
+    supabaseClient.auth.getSession(),
+  ]);
+
+  if (!animaisExcluidos || animaisExcluidos.length === 0) return;
+
+  await supabaseClient.from('log_exclusoes').insert({
+    usuario: session?.user?.email || null,
+    quantidade: animaisExcluidos.length,
+    animais: animaisExcluidos,
+    pesagens: pesagensExcluidas || [],
+  });
+}
+
 async function excluirAnimal(id, brinco) {
   if (!confirm(`Excluir o animal #${brinco}? Essa ação não pode ser desfeita (inclui o histórico de pesagens).`)) return;
+
+  await registrarLogExclusao([id]);
 
   await supabaseClient.from('pesagens').delete().eq('animal_id', id);
   const { error } = await supabaseClient.from('animais').delete().eq('id', id);
@@ -914,7 +1106,7 @@ async function executarComConcorrencia(items, limite, worker, aoProgredir) {
 }
 
 function normalizarTexto(s) {
-  return String(s ?? '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return String(s ?? '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
 function normalizarCabecalho(s) {
@@ -1222,6 +1414,7 @@ async function processarPlanilhaPesagens() {
 
 // ---------- Modal: transferência ----------
 async function abrirModalTransferencia(animalId, brinco) {
+  transferenciaEmLoteIds = null;
   acaoAnimalId = animalId;
   acaoAnimalBrinco = brinco;
   document.getElementById('modalTransferenciaTitulo').textContent = `Transferir animal — #${brinco}`;
@@ -1241,6 +1434,24 @@ async function abrirModalTransferencia(animalId, brinco) {
   }
 }
 
+async function abrirModalTransferenciaLote() {
+  if (animaisSelecionados.size === 0) return;
+
+  transferenciaEmLoteIds = Array.from(animaisSelecionados);
+  acaoAnimalId = null;
+  document.getElementById('modalTransferenciaTitulo').textContent = `Transferir ${transferenciaEmLoteIds.length} animais selecionados`;
+  document.getElementById('msgTransferencia').className = 'msg';
+  document.getElementById('modalTransferencia').style.display = 'flex';
+
+  const selFazenda = document.getElementById('t_fazenda_id');
+  const { data: fazendas } = await supabaseClient.from('fazendas').select('id, nome').order('nome');
+  selFazenda.innerHTML = `<option value="">Selecione...</option>` +
+    (fazendas || []).map(f => `<option value="${f.id}">${f.nome}</option>`).join('');
+
+  document.getElementById('t_lote_id').innerHTML = `<option value="">Selecione a fazenda primeiro</option>`;
+  document.getElementById('t_manga_id').innerHTML = `<option value="">Selecione a fazenda primeiro</option>`;
+}
+
 async function salvarTransferencia() {
   const fazendaId = document.getElementById('t_fazenda_id').value;
   if (!fazendaId) { showMsg('msgTransferencia', 'Selecione a fazenda de destino.', 'error'); return; }
@@ -1248,11 +1459,15 @@ async function salvarTransferencia() {
   const btn = document.getElementById('btnSalvarTransferencia');
   btn.disabled = true;
 
-  const { error } = await supabaseClient.from('animais').update({
+  const payload = {
     fazenda_id: fazendaId,
     lote_id: document.getElementById('t_lote_id').value || null,
     manga_id: document.getElementById('t_manga_id').value || null,
-  }).eq('id', acaoAnimalId);
+  };
+
+  let query = supabaseClient.from('animais').update(payload);
+  query = transferenciaEmLoteIds ? query.in('id', transferenciaEmLoteIds) : query.eq('id', acaoAnimalId);
+  const { error } = await query;
 
   btn.disabled = false;
 
@@ -1261,7 +1476,55 @@ async function salvarTransferencia() {
     return;
   }
 
+  if (transferenciaEmLoteIds) {
+    animaisSelecionados.clear();
+    transferenciaEmLoteIds = null;
+  }
+
   fecharModal('modalTransferencia');
+  carregarAnimais();
+}
+
+// ---------- Modal: exclusão em massa ----------
+function abrirModalExclusaoLote() {
+  if (animaisSelecionados.size === 0) return;
+
+  exclusaoEmLoteIds = Array.from(animaisSelecionados);
+  const n = exclusaoEmLoteIds.length;
+  document.getElementById('modalExclusaoLoteTitulo').textContent = `Excluir ${n} animal${n === 1 ? '' : 'is'} selecionado${n === 1 ? '' : 's'}`;
+  document.getElementById('avisoExclusaoLote').textContent =
+    `Você está prestes a excluir ${n} animal${n === 1 ? '' : 'is'} selecionado${n === 1 ? '' : 's'}. Essa ação não pode ser desfeita (inclui o histórico de pesagens de cada um).`;
+  document.getElementById('e_confirmacao').value = '';
+  document.getElementById('btnConfirmarExclusaoLote').disabled = true;
+  document.getElementById('msgExclusaoLote').className = 'msg';
+  document.getElementById('modalExclusaoLote').style.display = 'flex';
+}
+
+function validarConfirmacaoExclusaoLote() {
+  const valor = document.getElementById('e_confirmacao').value.trim().toLowerCase();
+  document.getElementById('btnConfirmarExclusaoLote').disabled = valor !== 'excluir';
+}
+
+async function confirmarExclusaoLote() {
+  if (document.getElementById('e_confirmacao').value.trim().toLowerCase() !== 'excluir') return;
+
+  const btn = document.getElementById('btnConfirmarExclusaoLote');
+  btn.disabled = true;
+
+  await registrarLogExclusao(exclusaoEmLoteIds);
+
+  await supabaseClient.from('pesagens').delete().in('animal_id', exclusaoEmLoteIds);
+  const { error } = await supabaseClient.from('animais').delete().in('id', exclusaoEmLoteIds);
+
+  if (error) {
+    showMsg('msgExclusaoLote', 'Não foi possível excluir: ' + error.message, 'error');
+    btn.disabled = false;
+    return;
+  }
+
+  animaisSelecionados.clear();
+  exclusaoEmLoteIds = [];
+  fecharModal('modalExclusaoLote');
   carregarAnimais();
 }
 
@@ -1274,7 +1537,8 @@ function fecharModal(modalId) {
   await checkAuth();
   showUserEmail();
   document.getElementById('a_data_entrada').value = new Date().toISOString().slice(0, 10);
-  carregarAnimais();
+  await carregarAnimais();
+  aplicarFiltrosDaURL();
 })();
 </script>
 

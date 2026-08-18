@@ -188,7 +188,7 @@ async function carregarFazendasNoSelect() {
 async function carregarMangas() {
   const { data: mangas, error } = await supabaseClient
     .from('vw_mangas_ocupacao')
-    .select('id, numero, fazenda_nome')
+    .select('*')
     .order('numero');
 
   if (error) {
@@ -211,7 +211,7 @@ async function carregarMangas() {
 
   document.getElementById('tabelaMangas').innerHTML = mangas.map(m => `
       <tr>
-        <td><b style="color:var(--text)">Manga ${m.numero}</b></td>
+        <td><a href="javascript:void(0)" onclick="verAnimaisDaManga('${m.id}','${m.fazenda_id}','${m.numero}')" style="color:var(--text);font-weight:bold;text-decoration:underline;cursor:pointer" title="Ver animais dessa manga">Manga ${m.numero}</a></td>
         <td>${m.fazenda_nome || '—'}</td>
         <td>${contagem[m.id] || 0}</td>
         <td style="white-space:nowrap">
@@ -220,6 +220,11 @@ async function carregarMangas() {
         </td>
       </tr>
     `).join('');
+}
+
+function verAnimaisDaManga(mangaId, fazendaId, numero) {
+  const params = new URLSearchParams({ fazenda: fazendaId || '', manga: mangaId, mangaLabel: `Manga ${numero}` });
+  location.href = `animais.html?${params.toString()}`;
 }
 
 async function editarManga(id) {

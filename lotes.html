@@ -184,7 +184,7 @@ async function carregarLotes() {
 
   document.getElementById('tabelaLotes').innerHTML = lotes.map(l => `
     <tr>
-      <td><b style="color:var(--text)">${l.nome}</b></td>
+      <td><a href="javascript:void(0)" onclick="verAnimaisDoLote('${l.id}','${l.fazenda_id}','${l.nome.replace(/'/g, "\\'")}')" style="color:var(--text);font-weight:bold;text-decoration:underline;cursor:pointer" title="Ver animais desse lote">${l.nome}</a></td>
       <td>${l.fazenda_nome || '—'}</td>
       <td>${l.categoria ? `<span class="badge bg-info">${l.categoria}</span>` : '—'}</td>
       <td>${l.animais_ativos || 0}</td>
@@ -196,6 +196,11 @@ async function carregarLotes() {
       </td>
     </tr>
   `).join('');
+}
+
+function verAnimaisDoLote(loteId, fazendaId, nome) {
+  const params = new URLSearchParams({ fazenda: fazendaId || '', lote: loteId, loteLabel: nome });
+  location.href = `animais.html?${params.toString()}`;
 }
 
 async function editarLote(id) {

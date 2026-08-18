@@ -25,6 +25,10 @@ document.getElementById('mainContent').innerHTML = `
       <div class="pagetitle">Relatórios</div>
       <div class="pagesub">Desempenho zootécnico — peso e GMD por fazenda, manga e lote</div>
     </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-secondary" id="btnLogExclusoes" onclick="baixarLogExclusoes()" title="Baixa um Excel com o histórico de todos os animais já excluídos do sistema"><i class="ti ti-history"></i> Log de exclusões</button>
+      <button class="btn btn-primary" id="btnBackupCompleto" onclick="baixarBackupCompleto()" title="Baixa um Excel com todas as tabelas do banco (fazendas, lotes, mangas, animais, pesagens, compras, vendas), uma aba por tabela — guarde em local seguro"><i class="ti ti-download"></i> Backup completo (Excel)</button>
+    </div>
   </div>
 
   <div class="toolbar">
@@ -647,6 +651,110 @@ function renderTabela() {
       <td style="font-weight:600;color:var(--text)">${gmdtMedio.toFixed(2)} kg/d</td>
     </tr>
   `;
+}
+
+// ---------- Log de exclusões ----------
+// Lê a tabela log_exclusoes (gravada pela página Animais toda vez que algo é excluído)
+// e exporta um Excel com o histórico completo, sob demanda.
+async function baixarLogExclusoes() {
+  const btn = document.getElementById('btnLogExclusoes');
+  const textoOriginal = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Gerando...';
+
+  try {
+    const logs = await buscarPaginado(() => supabaseClient.from('log_exclusoes').select('*').order('criado_em', { ascending: false }));
+
+    if (!logs || logs.length === 0) {
+      alert('Nenhuma exclusão registrada no sistema ainda.');
+      return;
+    }
+
+    const resumo = logs.map(l => ({
+      'Data/hora': new Date(l.criado_em).toLocaleString('pt-BR'),
+      'Usuário': l.usuario || '',
+      'Quantidade de animais': l.quantidade,
+    }));
+
+    const animaisFlat = [];
+    logs.forEach(l => (l.animais || []).forEach(a => {
+      animaisFlat.push({ 'Excluído em': new Date(l.criado_em).toLocaleString('pt-BR'), 'Excluído por': l.usuario || '', ...a });
+    }));
+
+    const pesagensFlat = [];
+    logs.forEach(l => (l.pesagens || []).forEach(p => {
+      pesagensFlat.push({ 'Excluído em': new Date(l.criado_em).toLocaleString('pt-BR'), ...p });
+    }));
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumo), 'Resumo');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(animaisFlat), 'Animais excluidos');
+    XLSX.utils.book_append_sheet(
+      wb,
+      pesagensFlat.length > 0 ? XLSX.utils.json_to_sheet(pesagensFlat) : XLSX.utils.aoa_to_sheet([['(sem pesagens)']]),
+      'Pesagens excluidas'
+    );
+
+    XLSX.writeFile(wb, `log-exclusoes-pontual-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  } catch (err) {
+    alert('Erro ao gerar o log: ' + (err.message || err));
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = textoOriginal;
+  }
+}
+
+// ---------- Backup completo ----------
+// Dump bruto de todas as tabelas do banco, uma aba por tabela, com os IDs originais
+// preservados (pra permitir reconstrução manual em caso de perda de dados no Supabase).
+async function baixarBackupCompleto() {
+  const btn = document.getElementById('btnBackupCompleto');
+  const textoOriginal = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Gerando backup...';
+
+  const tabelas = [
+    { nome: 'fazendas', aba: 'Fazendas' },
+    { nome: 'lotes', aba: 'Lotes' },
+    { nome: 'mangas', aba: 'Mangas' },
+    { nome: 'animais', aba: 'Animais' },
+    { nome: 'pesagens', aba: 'Pesagens' },
+    { nome: 'compras', aba: 'Compras' },
+    { nome: 'compras_parcelas', aba: 'Compras_Parcelas' },
+    { nome: 'vendas', aba: 'Vendas' },
+    { nome: 'vendas_parcelas', aba: 'Vendas_Parcelas' },
+    { nome: 'log_exclusoes', aba: 'Log_Exclusoes' },
+  ];
+
+  try {
+    const wb = XLSX.utils.book_new();
+    const agora = new Date();
+
+    const wsInfo = XLSX.utils.aoa_to_sheet([
+      ['Backup completo — Agropecuária Pontual'],
+      ['Gerado em', agora.toLocaleString('pt-BR')],
+      [''],
+      ['Esse arquivo é uma cópia bruta das tabelas do banco, uma aba por tabela,'],
+      ['com os IDs originais preservados. Guarde em local seguro — em caso de'],
+      ['perda de dados no banco, essas abas servem de base pra reconstrução manual.'],
+    ]);
+    XLSX.utils.book_append_sheet(wb, wsInfo, 'Info');
+
+    for (const t of tabelas) {
+      const dados = await buscarPaginado(() => supabaseClient.from(t.nome).select('*'));
+      const ws = (dados && dados.length > 0)
+        ? XLSX.utils.json_to_sheet(dados)
+        : XLSX.utils.aoa_to_sheet([['(sem registros)']]);
+      XLSX.utils.book_append_sheet(wb, ws, t.aba);
+    }
+
+    XLSX.writeFile(wb, `backup-pontual-${agora.toISOString().slice(0, 10)}.xlsx`);
+  } catch (err) {
+    alert('Erro ao gerar o backup: ' + (err.message || err));
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = textoOriginal;
+  }
 }
 
 // ---------- Exportação ----------
