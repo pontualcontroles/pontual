@@ -1,2 +1,5 @@
 import-*.xlsx
 limpar-dados.sql
+
+.vercel
+.env*

@@ -159,7 +159,7 @@ document.getElementById('mainContent').innerHTML = `
       <div class="cardh">Compra e custos</div>
       <div class="cardb">
         <div class="frow cols-3">
-          <div class="fgroup"><label>Peso de entrada (kg) *</label><input id="a_peso_entrada" type="number" step="0.01" placeholder="220" oninput="recalcularCustoTotal(); recalcularIdade()"></div>
+          <div class="fgroup"><label>Peso de entrada (kg)</label><input id="a_peso_entrada" type="number" step="0.01" placeholder="Deixe em branco se ainda não pesou" oninput="recalcularCustoTotal(); recalcularIdade()"></div>
           <div class="fgroup"><label>Preço de compra (R$/kg)</label><input id="a_preco_compra_kg" type="number" step="0.01" placeholder="14.50" oninput="recalcularCustoTotal()"></div>
           <div class="fgroup"><label>Frete (R$)</label><input id="a_frete_compra" type="number" step="0.01" placeholder="0" oninput="recalcularCustoTotal()"></div>
         </div>
@@ -854,7 +854,6 @@ async function salvarAnimal() {
   if (!sexo) { showMsg('msgCadastro', 'Selecione o sexo do animal.', 'error'); return; }
   if (!fazendaId) { showMsg('msgCadastro', 'Selecione a fazenda.', 'error'); return; }
   if (!dataEntrada) { showMsg('msgCadastro', 'A data de entrada é obrigatória.', 'error'); return; }
-  if (!pesoEntrada) { showMsg('msgCadastro', 'O peso de entrada é obrigatório.', 'error'); return; }
 
   const payload = {
     brinco,
@@ -872,7 +871,7 @@ async function salvarAnimal() {
     data_entrada: dataEntrada,
     produtor_origem: document.getElementById('a_produtor_origem').value.trim() || null,
     compra_id: document.getElementById('a_compra_id').value || null,
-    peso_entrada: Number(pesoEntrada),
+    peso_entrada: pesoEntrada ? Number(pesoEntrada) : null,
     preco_compra_kg: document.getElementById('a_preco_compra_kg').value ? Number(document.getElementById('a_preco_compra_kg').value) : null,
     frete_compra: document.getElementById('a_frete_compra').value ? Number(document.getElementById('a_frete_compra').value) : 0,
     observacoes: document.getElementById('a_observacoes').value.trim() || null,
@@ -1240,8 +1239,12 @@ async function processarPlanilhaAnimais() {
     const dataEntrada = excelDateParaISO(linha.dataentrada);
     if (!dataEntrada) { erro('Data de entrada inválida ou em branco.'); continue; }
 
-    const pesoEntrada = parseFloat(String(linha.pesoentrada).replace(',', '.'));
-    if (!pesoEntrada) { erro('Peso de entrada inválido ou em branco.'); continue; }
+    let pesoEntrada = null;
+    const pesoTexto = String(linha.pesoentrada ?? '').trim();
+    if (pesoTexto) {
+      pesoEntrada = parseFloat(pesoTexto.replace(',', '.'));
+      if (!pesoEntrada || isNaN(pesoEntrada)) { erro('Peso de entrada inválido — deixe em branco se ainda não pesou, ou corrija o valor.'); continue; }
+    }
 
     let loteId = null;
     const loteNome = String(linha.lote || '').trim();
@@ -1311,6 +1314,7 @@ async function processarPlanilhaAnimais() {
     }
   });
 
+  let semPesoCount = 0;
   await executarComConcorrencia(validosSemDuplicata, 8, async (item) => {
     try {
       const { error } = await supabaseClient.from('animais').insert(item.payload);
@@ -1318,6 +1322,7 @@ async function processarPlanilhaAnimais() {
         const motivo = error.code === '23505' ? 'Já existe um animal com esse brinco.' : error.message;
         resultados.push({ linha: item.linha, brinco: item.brinco, status: 'erro', motivo });
       } else {
+        if (item.payload.peso_entrada === null) semPesoCount++;
         resultados.push({ linha: item.linha, brinco: item.brinco, status: 'ok', motivo: 'Importado com sucesso.' });
       }
     } catch (err) {
@@ -1332,7 +1337,10 @@ async function processarPlanilhaAnimais() {
 
   const sucesso = resultados.filter(r => r.status === 'ok').length;
   btn.disabled = false;
-  showMsg('msgImportAnimais', `${sucesso} de ${resultados.length} linha(s) importada(s) com sucesso.`, sucesso === resultados.length ? 'success' : 'error');
+  const avisoSemPeso = semPesoCount > 0
+    ? ` ${semPesoCount} animal${semPesoCount === 1 ? '' : 'is'} registrado${semPesoCount === 1 ? '' : 's'} sem peso de entrada — pesar depois.`
+    : '';
+  showMsg('msgImportAnimais', `${sucesso} de ${resultados.length} linha(s) importada(s) com sucesso.${avisoSemPeso}`, sucesso === resultados.length ? 'success' : 'error');
 
   if (sucesso > 0) carregarAnimais();
 }
