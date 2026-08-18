@@ -442,7 +442,10 @@ async function carregarDados() {
       pesoAnterior = a.peso_entrada;
       dataPesoAnterior = a.data_entrada;
     } else {
-      dataUltimoPeso = a.data_entrada;
+      // Sem pesagem registrada ainda: só conta a data de entrada como "última pesagem"
+      // se o peso de entrada foi de fato informado (senão o animal simplesmente ainda
+      // não tem peso nenhum registrado).
+      dataUltimoPeso = a.peso_entrada !== null ? a.data_entrada : null;
     }
 
     if (dataPesoAnterior && dataUltimoPeso) {
