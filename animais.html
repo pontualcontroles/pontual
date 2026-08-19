@@ -160,7 +160,7 @@ document.getElementById('mainContent').innerHTML = `
       <div class="cardb">
         <div class="frow cols-3">
           <div class="fgroup"><label>Peso de entrada (kg)</label><input id="a_peso_entrada" type="number" step="0.01" placeholder="Deixe em branco se ainda não pesou" oninput="recalcularCustoTotal(); recalcularIdade()"></div>
-          <div class="fgroup"><label>Preço de compra (R$/kg)</label><input id="a_preco_compra_kg" type="number" step="0.01" placeholder="14.50" oninput="recalcularCustoTotal()"></div>
+          <div class="fgroup"><label>Preço de compra (R$/kg)</label><input id="a_preco_compra_kg" type="number" step="0.01" placeholder="14.50" oninput="precoEditadoManualmente = true; recalcularCustoTotal()"></div>
           <div class="fgroup"><label>Frete (R$)</label><input id="a_frete_compra" type="number" step="0.01" placeholder="0" oninput="recalcularCustoTotal()"></div>
         </div>
         <div class="frow cols-3">
@@ -397,6 +397,7 @@ document.getElementById('mainContent').innerHTML = `
 `;
 
 let animalEditandoId = null;
+let precoEditadoManualmente = false;
 let animaisCache = [];
 let acaoAnimalId = null;
 let acaoAnimalBrinco = null;
@@ -426,6 +427,7 @@ function mostrarSubImportar(sub) {
 
 function limparFormulario() {
   animalEditandoId = null;
+  precoEditadoManualmente = false;
   ['a_brinco','a_sexo','a_categoria','a_raca','a_pelagem','a_marca','a_fazenda_id','a_lote_id','a_manga_id',
    'a_data_nascimento','a_data_desmame','a_produtor_origem','a_compra_id','a_peso_entrada','a_preco_compra_kg',
    'a_frete_compra','a_observacoes'].forEach(id => {
@@ -783,6 +785,7 @@ async function editarAnimal(id) {
   if (error) { alert('Erro ao carregar animal: ' + error.message); return; }
 
   animalEditandoId = id;
+  precoEditadoManualmente = false;
   mostrarAba('cadastro');
   await carregarSelectsCadastro();
 
@@ -876,6 +879,9 @@ async function salvarAnimal() {
     frete_compra: document.getElementById('a_frete_compra').value ? Number(document.getElementById('a_frete_compra').value) : 0,
     observacoes: document.getElementById('a_observacoes').value.trim() || null,
   };
+  // Se o preço de compra foi digitado à mão nessa sessão do formulário, marca como não-rateado
+  // pra proteger esse valor de ser sobrescrito depois pelo botão "Distribuir valor" em Compras.
+  if (precoEditadoManualmente) payload.preco_rateado = false;
 
   const btn = document.getElementById('btnSalvarAnimal');
   btn.disabled = true;
