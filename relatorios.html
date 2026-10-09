@@ -461,6 +461,9 @@ async function carregarDados() {
     return {
       ...a,
       ...(extrasPorId.get(a.id) || {}),
+      // Fornecedor de verdade vem da compra vinculada (view); produtor_origem antigo
+      // ficou vazio desde que o cadastro passou a usar compra_id.
+      produtor_origem: a.fornecedor || a.produtor_origem || null,
       peso_anterior: pesoAnterior, data_peso_anterior: dataPesoAnterior,
       data_ultimo_peso: dataUltimoPeso, dias_entre_pesagens: diasEntre,
       gmd_atual: gmdPeriodo, gmdt,
