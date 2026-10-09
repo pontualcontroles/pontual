@@ -180,6 +180,10 @@ document.getElementById('mainContent').innerHTML = `
         <option value="0">Todo o período</option>
       </select>
     </div>
+    <div class="card" style="margin-bottom:14px">
+      <div class="cardh">Ranking de fornecedores — GMD médio desde a entrada</div>
+      <div class="cardb" id="rankingFornecedores"></div>
+    </div>
     <div class="card">
       <div class="cardh">Desempenho do fornecedor</div>
       <div class="cardb" id="conteudoDesempenhoFornecedor">
@@ -983,7 +987,99 @@ function exportarPdfPersonalizado() {
 }
 
 // ---------- Desempenho por fornecedor ----------
+// GMD acima disso (ou abaixo do negativo) é quase certamente erro de digitação na
+// pesagem (ex.: 528 no lugar de 258) — fica fora da média pra não distorcer o ranking.
+const GMD_LIMITE_PLAUSIVEL = 4;
+
+function dataCorteFornecedor() {
+  const periodoMeses = parseInt(document.getElementById('filtroPeriodoFornecedor').value) || 0;
+  if (periodoMeses <= 0) return null;
+  const hoje = new Date();
+  return new Date(hoje.getFullYear(), hoje.getMonth() - periodoMeses, hoje.getDate()).toISOString().slice(0, 10);
+}
+
+function renderRankingFornecedores() {
+  const el = document.getElementById('rankingFornecedores');
+  const dataCorte = dataCorteFornecedor();
+  const noPeriodo = a => !dataCorte || (a.data_entrada && a.data_entrada >= dataCorte);
+
+  const grupos = new Map();
+  let somaGeral = 0, qtdGeral = 0, descartados = 0;
+  animaisCache.filter(noPeriodo).forEach(a => {
+    if (!a.produtor_origem) return;
+    if (!grupos.has(a.produtor_origem)) grupos.set(a.produtor_origem, { nome: a.produtor_origem, total: 0, gmds: [], ganhos: [], mortos: 0 });
+    const g = grupos.get(a.produtor_origem);
+    g.total++;
+    if (a.status === 'morto') g.mortos++;
+    // Só conta GMD de quem já teve pesagem depois da entrada (data_ultimo_peso > data_entrada)
+    if (a.gmdt === null || a.gmdt === undefined || !a.data_ultimo_peso || a.data_ultimo_peso === a.data_entrada) return;
+    const gmd = Number(a.gmdt);
+    if (Math.abs(gmd) > GMD_LIMITE_PLAUSIVEL) { descartados++; return; }
+    g.gmds.push(gmd);
+    if (a.peso_atual !== null && a.peso_entrada !== null) g.ganhos.push(Number(a.peso_atual) - Number(a.peso_entrada));
+    somaGeral += gmd; qtdGeral++;
+  });
+
+  const media = l => l.length ? l.reduce((s, v) => s + v, 0) / l.length : null;
+  const mediaGeral = qtdGeral ? somaGeral / qtdGeral : null;
+  const lista = [...grupos.values()]
+    .map(g => ({ ...g, gmd: media(g.gmds), ganho: media(g.ganhos), pesados: g.gmds.length }))
+    .sort((a, b) => (b.gmd ?? -Infinity) - (a.gmd ?? -Infinity));
+
+  if (!lista.length) {
+    el.innerHTML = '<p style="color:var(--text-dim);font-size:13px">Nenhum animal com fornecedor nesse período.</p>';
+    return;
+  }
+
+  const fmt = (v, c) => v === null ? '—' : v.toLocaleString('pt-BR', { minimumFractionDigits: c, maximumFractionDigits: c });
+  const maxAbs = Math.max(0.01, ...lista.filter(f => f.gmd !== null).map(f => Math.abs(f.gmd)));
+  const temNegativo = lista.some(f => f.gmd !== null && f.gmd < 0);
+  // Eixo: com valores negativos, o zero fica a 30% da largura; senão as barras partem da esquerda
+  const zeroPct = temNegativo ? 30 : 0;
+  const escala = (100 - zeroPct) / maxAbs;
+  const escalaNeg = temNegativo ? zeroPct / maxAbs : 0;
+
+  const linhas = lista.map((f, i) => {
+    let barra = '';
+    if (f.gmd !== null) {
+      const cor = mediaGeral !== null && f.gmd >= mediaGeral ? 'var(--success)' : 'var(--danger)';
+      const largura = f.gmd >= 0 ? f.gmd * escala : Math.abs(f.gmd) * escalaNeg;
+      const esquerda = f.gmd >= 0 ? zeroPct : zeroPct - largura;
+      barra = `<div style="position:absolute;top:3px;bottom:3px;left:${esquerda}%;width:${Math.max(largura, 0.5)}%;background:${cor};border-radius:3px;opacity:.85"></div>`;
+    }
+    const poucos = f.pesados > 0 && f.pesados < 10 ? ' <span title="Menos de 10 animais pesados — média pouco confiável" style="color:var(--text-dim)">*</span>' : '';
+    return `
+      <tr style="cursor:pointer" onclick="document.getElementById('filtroFornecedorDesemp').value=${JSON.stringify(f.nome).replace(/"/g, '&quot;')};renderDesempenhoFornecedor()">
+        <td style="text-align:left;white-space:nowrap">${i + 1}. ${f.nome}${poucos}</td>
+        <td style="width:40%;min-width:140px"><div style="position:relative;height:20px">
+          ${temNegativo ? `<div style="position:absolute;top:0;bottom:0;left:${zeroPct}%;border-left:1px solid var(--border)"></div>` : ''}
+          ${barra}
+        </div></td>
+        <td style="font-weight:600">${f.gmd === null ? '<span style="color:var(--text-dim)">sem pesagem</span>' : fmt(f.gmd, 2) + ' kg/d'}</td>
+        <td>${fmt(f.ganho, 1)}${f.ganho !== null ? ' kg' : ''}</td>
+        <td>${f.pesados}/${f.total}</td>
+        <td>${f.mortos ? `${f.mortos} (${fmt(f.mortos / f.total * 100, 1)}%)` : '0'}</td>
+      </tr>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div style="overflow-x:auto">
+      <table class="table-center">
+        <thead><tr><th style="text-align:left">Fornecedor</th><th></th><th>GMD médio</th><th>Ganho médio</th><th>Pesados / animais</th><th>Mortes</th></tr></thead>
+        <tbody>${linhas}</tbody>
+      </table>
+    </div>
+    <p style="font-size:11px;color:var(--text-dim);margin-top:10px">
+      Média geral: <b>${fmt(mediaGeral, 2)} kg/d</b>. Verde = acima da média, vermelho = abaixo.
+      GMD contado desde a entrada, só de animais que já tiveram pesagem depois de chegar.
+      * menos de 10 animais pesados (média pouco confiável).
+      ${descartados ? `${descartados} pesagem${descartados === 1 ? '' : 's'} com GMD acima de ${GMD_LIMITE_PLAUSIVEL} kg/d (provável erro de digitação) ficou${descartados === 1 ? '' : 'aram'} fora.` : ''}
+      Clique num fornecedor pra ver o detalhe abaixo.
+    </p>`;
+}
+
 function renderDesempenhoFornecedor() {
+  renderRankingFornecedores();
   const el = document.getElementById('conteudoDesempenhoFornecedor');
   const fornecedor = document.getElementById('filtroFornecedorDesemp').value;
   if (!fornecedor) {
